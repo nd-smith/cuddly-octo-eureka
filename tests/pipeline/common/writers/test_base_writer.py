@@ -58,6 +58,20 @@ class TestBaseDeltaWriterInit:
         writer = _make_writer(z_order_columns=None)
         assert writer._z_order_columns == []
 
+    def test_default_subprocess_timeout(self):
+        writer = _make_writer()
+        assert writer.SUBPROCESS_TIMEOUT_SECONDS == 300
+
+    def test_custom_subprocess_timeout(self):
+        writer = _make_writer(subprocess_timeout_seconds=600)
+        assert writer.SUBPROCESS_TIMEOUT_SECONDS == 600
+
+    def test_custom_timeout_does_not_affect_class_default(self):
+        writer = _make_writer(subprocess_timeout_seconds=600)
+        assert writer.SUBPROCESS_TIMEOUT_SECONDS == 600
+        # Class-level default unchanged
+        assert BaseDeltaWriter.SUBPROCESS_TIMEOUT_SECONDS == 300
+
     def test_subclass_logger_uses_subclass_name(self):
         class MyWriter(BaseDeltaWriter):
             pass

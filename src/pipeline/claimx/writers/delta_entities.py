@@ -3,6 +3,7 @@
 Writes entity data to 7 Delta tables using merge operations for idempotency.
 """
 
+import asyncio
 import logging
 from datetime import UTC, date, datetime
 from typing import Any
@@ -311,9 +312,11 @@ class ClaimXEntityWriter:
 
     async def write_all(self, entity_rows: EntityRowsMessage) -> tuple[dict[str, int], list[str]]:
         """
-        Write all entity rows to their respective Delta tables.
+        Write all entity rows to their respective Delta tables concurrently.
 
         Uses merge (upsert) operations for all tables except contacts/media (append-only).
+        Tables are written concurrently via asyncio.gather to avoid serializing
+        independent I/O-bound merge operations behind one another.
 
         Args:
             entity_rows: EntityRowsMessage with data for each table
@@ -324,11 +327,29 @@ class ClaimXEntityWriter:
         counts: dict[str, int] = {}
         failed_tables: list[str] = []
 
+        # Build list of (entity_type, rows) pairs that have data
+        pending: list[tuple[str, list]] = []
         for entity_type in self._ENTITY_TYPES:
             rows = getattr(entity_rows, entity_type, None)
             if rows:
-                result = await self._write_table(entity_type, rows)
-                if result is not None:
+                pending.append((entity_type, rows))
+
+        if pending:
+            # Write all tables concurrently
+            results = await asyncio.gather(
+                *(self._write_table(entity_type, rows) for entity_type, rows in pending),
+                return_exceptions=True,
+            )
+
+            for (entity_type, _rows), result in zip(pending, results):
+                if isinstance(result, BaseException):
+                    self.logger.error(
+                        f"Unexpected error writing {entity_type}",
+                        extra={"table_name": entity_type, "error": str(result)},
+                        exc_info=result,
+                    )
+                    failed_tables.append(entity_type)
+                elif result is not None:
                     counts[entity_type] = result
                 else:
                     failed_tables.append(entity_type)

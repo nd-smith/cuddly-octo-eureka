@@ -92,7 +92,7 @@ def _get_delta_process_pool() -> ProcessPoolExecutor:
     global _process_pool
     if _process_pool is None:
         ctx = multiprocessing.get_context("forkserver")
-        _process_pool = ProcessPoolExecutor(max_workers=2, mp_context=ctx)
+        _process_pool = ProcessPoolExecutor(max_workers=4, mp_context=ctx)
         atexit.register(_shutdown_delta_process_pool)
     return _process_pool
 
@@ -153,10 +153,11 @@ class BaseDeltaWriter:
                 return await self._async_append(df)
     """
 
-    # Timeout for subprocess Delta writes. Prevents indefinite hangs when
-    # the subprocess blocks on storage I/O (e.g., after a WebSocket reconnection
-    # with stale credentials). On timeout the batch returns False (triggering
-    # retry logic) and the held batch_lock is released, unblocking consumers.
+    # Default timeout for subprocess Delta writes. Prevents indefinite hangs
+    # when the subprocess blocks on storage I/O (e.g., after a WebSocket
+    # reconnection with stale credentials). On timeout the batch returns False
+    # (triggering retry logic) and the held batch_lock is released, unblocking
+    # consumers. Can be overridden per-instance via the constructor.
     SUBPROCESS_TIMEOUT_SECONDS = 300  # 5 minutes
 
     def __init__(
@@ -165,6 +166,7 @@ class BaseDeltaWriter:
         timestamp_column: str = "ingested_at",
         partition_column: str | None = None,
         z_order_columns: list[str] | None = None,
+        subprocess_timeout_seconds: int | None = None,
     ):
         """
         Initialize base Delta writer.
@@ -181,6 +183,9 @@ class BaseDeltaWriter:
         """
         self.table_path = table_path
         self.logger = logging.getLogger(self.__class__.__name__)
+
+        if subprocess_timeout_seconds is not None:
+            self.SUBPROCESS_TIMEOUT_SECONDS = subprocess_timeout_seconds
 
         self._timestamp_column = timestamp_column
         self._partition_column = partition_column
