@@ -18,6 +18,7 @@ import atexit
 import io
 import logging
 import multiprocessing
+import os
 import time
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
@@ -31,6 +32,19 @@ from pipeline.common.metrics import delta_write_duration_seconds
 # Module-level subprocess functions (must be top-level for pickling)
 # ---------------------------------------------------------------------------
 
+def _configure_object_store_timeouts() -> None:
+    """Set environment variables to bound object_store (Rust) retry/timeout behaviour.
+
+    Without these, the Rust object_store crate may retry Azure Blob Storage
+    list/get operations indefinitely when Azure returns malformed XML responses
+    (e.g. ``ill-formed document: start tag not closed``), causing the subprocess
+    to hang until the asyncio timeout kills it.
+    """
+    os.environ.setdefault("AZURE_STORAGE_MAX_RETRIES", "3")
+    os.environ.setdefault("AZURE_STORAGE_RETRY_TIMEOUT", "60")
+    os.environ.setdefault("OBJECT_STORE_REQUEST_TIMEOUT", "60")
+
+
 def _subprocess_delta_append(
     table_path: str,
     df_ipc_bytes: bytes,
@@ -40,6 +54,7 @@ def _subprocess_delta_append(
     batch_id: str | None,
 ) -> int:
     """Run DeltaTableWriter.append in a subprocess."""
+    _configure_object_store_timeouts()
     from pipeline.common.storage.delta import DeltaTableWriter
 
     df = pl.read_ipc(io.BytesIO(df_ipc_bytes))
@@ -63,6 +78,7 @@ def _subprocess_delta_merge(
     update_condition: str | None,
 ) -> int:
     """Run DeltaTableWriter.merge in a subprocess."""
+    _configure_object_store_timeouts()
     from pipeline.common.storage.delta import DeltaTableWriter
 
     df = pl.read_ipc(io.BytesIO(df_ipc_bytes))

@@ -303,6 +303,21 @@ class TestClassifyException:
         """Detects not found errors."""
         assert classify_exception(Exception("404 not found")) == ErrorCategory.PERMANENT
 
+    def test_azure_malformed_xml_errors(self):
+        """Detects Azure malformed XML responses as transient."""
+        assert classify_exception(
+            Exception(
+                "Generic MicrosoftAzure error: Got invalid list response: "
+                "ill-formed document: start tag not closed"
+            )
+        ) == ErrorCategory.TRANSIENT
+        assert classify_exception(
+            Exception("Got invalid list response from Azure")
+        ) == ErrorCategory.TRANSIENT
+        assert classify_exception(
+            Exception("ill-formed document: </OrMetad<?xml>")
+        ) == ErrorCategory.TRANSIENT
+
     def test_unknown_errors(self):
         """Returns UNKNOWN for unrecognized errors."""
         assert classify_exception(Exception("something weird")) == ErrorCategory.UNKNOWN
