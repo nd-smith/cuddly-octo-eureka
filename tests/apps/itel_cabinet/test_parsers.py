@@ -291,33 +291,33 @@ class TestDataBuilderExtractValue:
         export = ResponseAnswerExport(type="image", claim_media_ids=None)
         assert DataBuilder.extract_value(export) == []
 
-    def test_yes_normalizes_to_true(self):
+    def test_text_yes_preserved_as_string(self):
         export = ResponseAnswerExport(type="text", text="Yes")
-        assert DataBuilder.extract_value(export) is True
+        assert DataBuilder.extract_value(export) == "Yes"
 
-    def test_no_normalizes_to_false(self):
+    def test_text_no_preserved_as_string(self):
         export = ResponseAnswerExport(type="text", text="No")
-        assert DataBuilder.extract_value(export) is False
+        assert DataBuilder.extract_value(export) == "No"
 
-    def test_yes_with_trailing_text(self):
+    def test_text_yes_with_trailing_preserved(self):
         export = ResponseAnswerExport(type="text", text="Yes, definitely")
-        assert DataBuilder.extract_value(export) is True
+        assert DataBuilder.extract_value(export) == "Yes, definitely"
 
-    def test_there_is_no_normalizes_to_false(self):
+    def test_text_there_is_no_preserved_as_string(self):
         export = ResponseAnswerExport(type="text", text="There is no damage")
-        assert DataBuilder.extract_value(export) is False
+        assert DataBuilder.extract_value(export) == "There is no damage"
 
-    def test_case_insensitive_yes(self):
+    def test_text_case_variants_preserved(self):
         export = ResponseAnswerExport(type="text", text="YES")
-        assert DataBuilder.extract_value(export) is True
+        assert DataBuilder.extract_value(export) == "YES"
 
-    def test_case_insensitive_no(self):
+    def test_text_no_lowercase_preserved(self):
         export = ResponseAnswerExport(type="text", text="no")
-        assert DataBuilder.extract_value(export) is False
+        assert DataBuilder.extract_value(export) == "no"
 
-    def test_whitespace_stripped(self):
+    def test_text_whitespace_preserved(self):
         export = ResponseAnswerExport(type="text", text="  Yes  ")
-        assert DataBuilder.extract_value(export) is True
+        assert DataBuilder.extract_value(export) == "  Yes  "
 
     def test_regular_text_preserved(self):
         export = ResponseAnswerExport(type="text", text="Some description text")
@@ -332,6 +332,34 @@ class TestDataBuilderExtractValue:
             option_answer=OptionAnswer(name="Yes"),
         )
         assert DataBuilder.extract_value(export) is True
+
+    def test_option_no_normalizes_to_false(self):
+        export = ResponseAnswerExport(
+            type="option",
+            option_answer=OptionAnswer(name="No"),
+        )
+        assert DataBuilder.extract_value(export) is False
+
+    def test_option_there_is_no_normalizes_to_false(self):
+        export = ResponseAnswerExport(
+            type="option",
+            option_answer=OptionAnswer(name="There is no damage"),
+        )
+        assert DataBuilder.extract_value(export) is False
+
+    def test_option_not_available_normalizes_to_false(self):
+        export = ResponseAnswerExport(
+            type="option",
+            option_answer=OptionAnswer(name="Not Available"),
+        )
+        assert DataBuilder.extract_value(export) is False
+
+    def test_option_non_boolean_preserved(self):
+        export = ResponseAnswerExport(
+            type="option",
+            option_answer=OptionAnswer(name="Granite"),
+        )
+        assert DataBuilder.extract_value(export) == "Granite"
 
 
 class TestDataBuilderGetTopicCategory:
