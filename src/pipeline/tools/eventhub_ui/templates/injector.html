@@ -5,7 +5,10 @@
 <p class="text-muted mb-1">Publish a message to an EventHub</p>
 
 <div class="card">
-    <form id="inject-form">
+    <form id="inject-form"
+          hx-post="/inject/preview"
+          hx-target="#inject-result"
+          hx-swap="innerHTML">
         <div class="form-group">
             <label>EventHub</label>
             <select name="eventhub_name" id="inject-hub">
@@ -23,11 +26,7 @@
             <textarea name="body" id="inject-body" rows="12" placeholder='{"key": "value"}'></textarea>
         </div>
         <div style="display: flex; gap: 0.5rem;">
-            <button type="button" class="btn btn-primary"
-                    hx-post="/inject/preview"
-                    hx-include="#inject-form"
-                    hx-target="#inject-result"
-                    hx-swap="innerHTML">
+            <button type="submit" class="btn btn-primary">
                 Preview
             </button>
         </div>
