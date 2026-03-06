@@ -1,0 +1,14 @@
+{% if result.success %}
+<div class="card" style="border-color: var(--green);">
+    <p style="color: var(--green); font-weight: 600;">Message sent successfully</p>
+    <p class="text-muted" style="font-size: 0.85rem; margin-top: 0.25rem;">
+        Target: <span class="mono">{{ eventhub_name }}</span>
+        | Partition: <span class="mono">{{ result.partition_id }}</span>
+    </p>
+</div>
+{% else %}
+<div class="error-box">
+    <strong>Send failed</strong>
+    <p style="margin-top: 0.5rem; font-size: 0.85rem;">{{ result.error }}</p>
+</div>
+{% endif %}

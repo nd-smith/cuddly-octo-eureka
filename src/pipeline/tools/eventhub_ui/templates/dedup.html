@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Dedup Store{% endblock %}
+{% block content %}
+<h1>Dedup Store Management</h1>
+<p class="text-muted mb-1">Browse and manage the blob-based dedup cache</p>
+
+{% if config %}
+<div class="card" style="font-size: 0.85rem; margin-bottom: 1rem;">
+    <strong>Config:</strong>
+    Container: <span class="mono">{{ config.get('container_name', 'N/A') }}</span> |
+    TTL: <span class="mono">{{ config.get('ttl_seconds', 'N/A') }}s</span> |
+    Type: <span class="mono">{{ config.get('type', 'N/A') }}</span>
+</div>
+{% endif %}
+
+<div class="grid-2">
+    {% for worker in workers %}
+    <div class="card">
+        <h2 style="margin-top: 0;">{{ worker }}</h2>
+
+        <div style="display: flex; gap: 0.5rem; margin-bottom: 0.75rem;">
+            <button class="btn btn-primary"
+                    hx-get="/dedup/{{ worker }}/keys"
+                    hx-target="#dedup-result-{{ loop.index }}"
+                    hx-swap="innerHTML"
+                    hx-indicator="#dedup-spin-{{ loop.index }}">
+                Browse Keys
+            </button>
+            <form style="display: inline-flex; gap: 0.25rem; align-items: center;">
+                <input type="text" name="key" placeholder="trace_id..." style="width: 180px;">
+                <button type="button" class="btn"
+                        hx-post="/dedup/{{ worker }}/check"
+                        hx-include="closest form"
+                        hx-target="#dedup-result-{{ loop.index }}"
+                        hx-swap="innerHTML">
+                    Check
+                </button>
+            </form>
+            <form>
+                <button type="button" class="btn btn-danger"
+                        hx-post="/dedup/{{ worker }}/cleanup"
+                        hx-target="#dedup-result-{{ loop.index }}"
+                        hx-swap="innerHTML"
+                        hx-confirm="Clean up expired entries for {{ worker }}?">
+                    Cleanup
+                </button>
+            </form>
+        </div>
+
+        <span id="dedup-spin-{{ loop.index }}" class="htmx-indicator text-muted">Loading...</span>
+        <div id="dedup-result-{{ loop.index }}"></div>
+    </div>
+    {% endfor %}
+</div>
+
+{% if not workers %}
+<div class="card">
+    <p class="text-muted">No dedup workers configured.</p>
+</div>
+{% endif %}
+{% endblock %}

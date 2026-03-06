@@ -17,6 +17,7 @@
             --yellow: #d29922;
             --red: #f85149;
             --orange: #db6d28;
+            --blue: #388bfd;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -41,6 +42,43 @@
         nav .brand { font-weight: 600; font-size: 1.1rem; color: var(--text); }
         nav a { color: var(--text-muted); font-size: 0.9rem; }
         nav a:hover, nav a.active { color: var(--text); text-decoration: none; }
+
+        .nav-dropdown {
+            position: relative;
+            display: inline-block;
+        }
+        .nav-dropdown > span {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            cursor: pointer;
+        }
+        .nav-dropdown > span:hover { color: var(--text); }
+        .nav-dropdown-content {
+            display: none;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            min-width: 180px;
+            z-index: 100;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+            padding: 0.25rem 0;
+            margin-top: 0.5rem;
+        }
+        .nav-dropdown:hover .nav-dropdown-content { display: block; }
+        .nav-dropdown-content a {
+            display: block;
+            padding: 0.4rem 0.75rem;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+        .nav-dropdown-content a:hover {
+            background: rgba(88, 166, 255, 0.1);
+            color: var(--text);
+            text-decoration: none;
+        }
 
         h1 { font-size: 1.5rem; margin-bottom: 1rem; font-weight: 600; }
         h2 { font-size: 1.2rem; margin: 1.5rem 0 0.75rem; font-weight: 600; color: var(--text-muted); }
@@ -77,6 +115,7 @@
         .badge-yellow { background: rgba(210, 153, 34, 0.15); color: var(--yellow); }
         .badge-red { background: rgba(248, 81, 73, 0.15); color: var(--red); }
         .badge-muted { background: rgba(139, 148, 158, 0.15); color: var(--text-muted); }
+        .badge-blue { background: rgba(56, 139, 253, 0.15); color: var(--blue); }
 
         .mono { font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace; font-size: 0.8rem; }
         .text-muted { color: var(--text-muted); }
@@ -111,6 +150,8 @@
         .btn:hover { border-color: var(--text-muted); text-decoration: none; }
         .btn-danger { border-color: var(--red); color: var(--red); }
         .btn-danger:hover { background: rgba(248, 81, 73, 0.15); }
+        .btn-primary { border-color: var(--accent); color: var(--accent); }
+        .btn-primary:hover { background: rgba(88, 166, 255, 0.15); }
 
         input[type="text"], input[type="number"], input[type="datetime-local"] {
             background: var(--bg);
@@ -121,6 +162,30 @@
             font-size: 0.85rem;
         }
         input:focus { outline: none; border-color: var(--accent); }
+
+        select {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 0.4rem 0.6rem;
+            color: var(--text);
+            font-size: 0.85rem;
+        }
+        select:focus { outline: none; border-color: var(--accent); }
+
+        textarea {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 0.6rem;
+            color: var(--text);
+            font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
+            font-size: 0.8rem;
+            line-height: 1.4;
+            resize: vertical;
+            width: 100%;
+        }
+        textarea:focus { outline: none; border-color: var(--accent); }
 
         .error-box {
             background: rgba(248, 81, 73, 0.1);
@@ -136,14 +201,44 @@
         .htmx-indicator { display: none; }
         .htmx-request .htmx-indicator { display: inline; }
         .spinner { color: var(--text-muted); }
+
+        .form-group { margin-bottom: 0.75rem; }
+        .form-group label {
+            display: block;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-bottom: 0.25rem;
+        }
     </style>
 </head>
 <body>
     <nav>
         <span class="brand">EventHub Utility</span>
         <a href="/">Overview</a>
-        <a href="/lag">Consumer Lag</a>
-        <a href="/logs">Logs</a>
+        <div class="nav-dropdown">
+            <span>Messages &#9662;</span>
+            <div class="nav-dropdown-content">
+                <a href="/messages/{{ (request.path_params.get('eventhub_name', '')) or '' }}">Viewer</a>
+                <a href="/inject">Inject</a>
+                <a href="/replay">Replay</a>
+                <a href="/search">Search</a>
+            </div>
+        </div>
+        <div class="nav-dropdown">
+            <span>Operations &#9662;</span>
+            <div class="nav-dropdown-content">
+                <a href="/lag">Consumer Lag</a>
+                <a href="/bulk-checkpoints">Bulk Checkpoints</a>
+            </div>
+        </div>
+        <div class="nav-dropdown">
+            <span>System &#9662;</span>
+            <div class="nav-dropdown-content">
+                <a href="/status">Pipeline Status</a>
+                <a href="/dedup">Dedup Store</a>
+                <a href="/logs">Logs</a>
+            </div>
+        </div>
     </nav>
     <div class="container">
         {% block content %}{% endblock %}

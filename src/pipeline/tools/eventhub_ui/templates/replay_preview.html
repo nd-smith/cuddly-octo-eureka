@@ -1,0 +1,39 @@
+<div class="card">
+    <h2 style="margin-top: 0;">Replay Preview</h2>
+    <p style="font-size: 0.85rem;">
+        <strong>Source:</strong> <span class="mono">{{ source_hub }}</span> partition {{ source_partition }}<br>
+        <strong>Time range:</strong> {{ start_time }} &mdash; {{ end_time }}<br>
+        <strong>Destination:</strong> <span class="mono">{{ dest_hub }}</span><br>
+        <strong>Messages found:</strong> {{ count }}
+    </p>
+
+    {% if messages %}
+    <details style="margin-top: 0.5rem;">
+        <summary class="btn" style="font-size: 0.75rem;">Show sample (first 5)</summary>
+        {% for msg in messages[:5] %}
+        <div style="margin-top: 0.5rem; font-size: 0.8rem;">
+            <span class="mono text-muted">seq={{ msg.sequence_number }} {{ msg.enqueued_time.strftime('%H:%M:%S') }}</span>
+            <pre style="margin-top: 0.25rem;">{{ msg.body[:200] }}{% if msg.body|length > 200 %}...{% endif %}</pre>
+        </div>
+        {% endfor %}
+    </details>
+
+    <form style="margin-top: 0.75rem;">
+        <input type="hidden" name="source_hub" value="{{ source_hub }}">
+        <input type="hidden" name="source_partition" value="{{ source_partition }}">
+        <input type="hidden" name="start_time" value="{{ start_time }}">
+        <input type="hidden" name="end_time" value="{{ end_time }}">
+        <input type="hidden" name="dest_hub" value="{{ dest_hub }}">
+        <button type="button" class="btn btn-danger"
+                hx-post="/replay/execute"
+                hx-include="closest form"
+                hx-target="#replay-result"
+                hx-swap="innerHTML"
+                hx-confirm="Replay {{ count }} messages to {{ dest_hub }}?">
+            Execute Replay
+        </button>
+    </form>
+    {% else %}
+    <p class="text-muted" style="margin-top: 0.5rem;">No messages found in the specified range.</p>
+    {% endif %}
+</div>

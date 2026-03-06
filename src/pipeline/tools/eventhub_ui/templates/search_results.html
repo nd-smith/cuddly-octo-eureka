@@ -1,0 +1,47 @@
+{% if errors %}
+<div class="error-box mb-1">
+    {% for err in errors %}
+    <div>{{ err }}</div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if results %}
+<p class="text-muted mb-1" style="font-size: 0.8rem;">
+    {{ results | length }} result(s){% if query %} matching "{{ query }}"{% endif %}
+</p>
+
+<div class="card" style="padding: 0; overflow-x: auto;">
+    <table style="font-size: 0.8rem;">
+        <thead>
+            <tr>
+                <th>Partition</th>
+                <th>Seq</th>
+                <th>Enqueued</th>
+                <th>Key</th>
+                <th>Body</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for msg in results %}
+            <tr>
+                <td class="mono">{{ msg.partition_id if msg.partition_id is defined else '-' }}</td>
+                <td class="mono">{{ msg.sequence_number }}</td>
+                <td class="mono" style="white-space: nowrap;">{{ msg.enqueued_time.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                <td class="mono">{{ msg.partition_key or '-' }}</td>
+                <td>
+                    <details>
+                        <summary class="btn" style="font-size: 0.7rem;">View</summary>
+                        <pre style="margin-top: 0.25rem; max-width: 600px;">{{ msg.body }}</pre>
+                    </details>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="card">
+    <p class="text-muted">No results found{% if query %} for "{{ query }}"{% endif %}.</p>
+</div>
+{% endif %}

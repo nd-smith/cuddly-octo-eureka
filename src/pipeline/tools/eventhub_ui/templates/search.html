@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Payload Search{% endblock %}
+{% block content %}
+<h1>Payload Search</h1>
+<p class="text-muted mb-1">Search across partitions for messages matching a query</p>
+
+<div class="card">
+    <form id="search-form">
+        <div style="display: flex; gap: 0.75rem; align-items: end; flex-wrap: wrap;">
+            <div class="form-group">
+                <label>EventHub</label>
+                <select name="eventhub_name">
+                    {% for hub in hubs %}
+                    <option value="{{ hub.eventhub_name }}">{{ hub.eventhub_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Partition</label>
+                <select name="partition">
+                    <option value="all">All</option>
+                    {% for i in range(8) %}
+                    <option value="{{ i }}">{{ i }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Start Time (UTC, required)</label>
+                <input type="datetime-local" name="start_time" required>
+            </div>
+            <div class="form-group">
+                <label>End Time (UTC, required)</label>
+                <input type="datetime-local" name="end_time" required>
+            </div>
+            <div class="form-group">
+                <label>Query</label>
+                <input type="text" name="query" placeholder="substring or field.path=value" style="width: 250px;">
+            </div>
+            <button type="button" class="btn btn-primary"
+                    hx-post="/search/execute"
+                    hx-include="#search-form"
+                    hx-target="#search-results"
+                    hx-swap="innerHTML"
+                    hx-indicator="#search-spinner">
+                Search
+            </button>
+            <span id="search-spinner" class="htmx-indicator text-muted">Searching...</span>
+        </div>
+    </form>
+</div>
+
+<div id="search-results"></div>
+{% endblock %}

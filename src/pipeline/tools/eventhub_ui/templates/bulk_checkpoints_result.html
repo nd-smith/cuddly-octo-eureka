@@ -1,0 +1,81 @@
+{% if preview %}
+<div class="card">
+    <h2 style="margin-top: 0;">Preview: {{ groups | length }} consumer group(s) selected</h2>
+    {% if groups %}
+    <table>
+        <thead>
+            <tr>
+                <th>EventHub</th>
+                <th>Consumer Group</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for g in groups %}
+            <tr>
+                <td class="mono">{{ g.eventhub_name }}</td>
+                <td class="mono">{{ g.consumer_group }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <form style="margin-top: 0.75rem;">
+        {% for key in selected_keys %}
+        <input type="hidden" name="selected" value="{{ key }}">
+        {% endfor %}
+        <button type="button" class="btn btn-danger"
+                hx-post="/bulk-checkpoints/execute"
+                hx-include="closest form"
+                hx-target="#bulk-result"
+                hx-swap="innerHTML"
+                hx-confirm="Advance checkpoints for {{ groups | length }} consumer groups to latest?">
+            Execute Advance
+        </button>
+    </form>
+    {% else %}
+    <p class="text-muted">No consumer groups selected.</p>
+    {% endif %}
+</div>
+{% else %}
+<div class="card">
+    <h2 style="margin-top: 0;">Results</h2>
+    {% if results %}
+    <table>
+        <thead>
+            <tr>
+                <th>EventHub</th>
+                <th>Consumer Group</th>
+                <th>Status</th>
+                <th>Details</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in results %}
+            <tr>
+                <td class="mono">{{ r.eventhub_name }}</td>
+                <td class="mono">{{ r.consumer_group }}</td>
+                <td>
+                    {% if r.success %}
+                    <span class="badge badge-green">success</span>
+                    {% else %}
+                    <span class="badge badge-red">failed</span>
+                    {% endif %}
+                </td>
+                <td class="text-muted" style="font-size: 0.8rem;">
+                    {% if r.success %}
+                    {{ r.changes | length }} partition(s) updated
+                    {% else %}
+                    {{ r.error }}
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <p style="color: var(--yellow); font-size: 0.85rem; margin-top: 0.75rem;">
+        Restart consumers for them to pick up the new checkpoints.
+    </p>
+    {% else %}
+    <p class="text-muted">No operations executed.</p>
+    {% endif %}
+</div>
+{% endif %}

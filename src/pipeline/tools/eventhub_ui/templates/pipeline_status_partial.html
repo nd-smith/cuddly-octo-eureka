@@ -1,0 +1,59 @@
+{% for domain, workers in grouped.items() %}
+<h2>{{ domain }}</h2>
+<div class="card">
+    <table>
+        <thead>
+            <tr>
+                <th>Worker</th>
+                <th>Port</th>
+                <th>Live</th>
+                <th>Ready</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for w in workers %}
+            <tr>
+                <td class="mono">{{ w.name }}</td>
+                <td class="mono">{{ w.port or '-' }}</td>
+                <td>
+                    {% if w.live is none %}
+                    <span class="badge badge-muted">unknown</span>
+                    {% elif w.live %}
+                    <span class="badge badge-green">yes</span>
+                    {% else %}
+                    <span class="badge badge-red">no</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if w.ready is none %}
+                    <span class="badge badge-muted">unknown</span>
+                    {% elif w.ready %}
+                    <span class="badge badge-green">yes</span>
+                    {% else %}
+                    <span class="badge badge-yellow">no</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if w.port is none %}
+                    <span class="badge badge-muted">dynamic port</span>
+                    {% elif w.ready %}
+                    <span class="badge badge-green">ready</span>
+                    {% elif w.live %}
+                    <span class="badge badge-yellow">alive</span>
+                    {% else %}
+                    <span class="badge badge-red">down</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endfor %}
+
+{% if not grouped %}
+<div class="card">
+    <p class="text-muted">No worker status data available.</p>
+</div>
+{% endif %}

@@ -1,0 +1,35 @@
+<div class="card"
+     {% if task.status == 'running' %}
+     hx-get="/replay/status/{{ task_id }}"
+     hx-trigger="every 2s"
+     hx-swap="outerHTML"
+     {% endif %}>
+    <h2 style="margin-top: 0;">Replay Progress</h2>
+    <p style="font-size: 0.85rem;">
+        Task: <span class="mono">{{ task_id }}</span> |
+        Status:
+        {% if task.status == 'running' %}
+        <span class="badge badge-yellow">running</span>
+        {% elif task.status == 'completed' %}
+        <span class="badge badge-green">completed</span>
+        {% else %}
+        <span class="badge badge-red">error</span>
+        {% endif %}
+    </p>
+
+    {% if task.total > 0 %}
+    <div style="margin-top: 0.5rem;">
+        <div style="background: var(--bg); border: 1px solid var(--border); border-radius: 4px; height: 24px; overflow: hidden;">
+            {% set pct = (task.replayed / task.total * 100) if task.total > 0 else 0 %}
+            <div style="background: var(--green); height: 100%; width: {{ pct }}%; transition: width 0.3s;"></div>
+        </div>
+        <p class="text-muted" style="font-size: 0.8rem; margin-top: 0.25rem;">
+            {{ task.replayed }} / {{ task.total }} messages replayed
+        </p>
+    </div>
+    {% endif %}
+
+    {% if task.error %}
+    <div class="error-box" style="margin-top: 0.5rem;">{{ task.error }}</div>
+    {% endif %}
+</div>

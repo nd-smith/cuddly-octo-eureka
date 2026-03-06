@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Pipeline Status{% endblock %}
+{% block content %}
+<h1 style="display: flex; align-items: center; gap: 1rem;">
+    Pipeline Status
+    <span class="badge badge-blue" style="font-size: 0.7rem;">LIVE</span>
+</h1>
+<p class="text-muted mb-1">Worker health status (auto-refreshes every 10s)</p>
+
+<div id="status-data"
+     hx-get="/status/data"
+     hx-trigger="load, every 10s"
+     hx-swap="innerHTML"
+     hx-indicator="#status-spinner">
+    <span id="status-spinner" class="htmx-indicator text-muted">Loading...</span>
+</div>
+{% endblock %}

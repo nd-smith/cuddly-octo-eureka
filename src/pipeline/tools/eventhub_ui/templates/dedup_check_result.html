@@ -1,0 +1,19 @@
+{% if cleanup_count is defined and cleanup_count is not none %}
+<div class="card" style="border-color: var(--green); padding: 0.75rem;">
+    <p style="color: var(--green);">Cleanup complete: <strong>{{ cleanup_count }}</strong> expired entries removed for {{ worker_name }}.</p>
+</div>
+{% elif key is not none %}
+<div class="card" style="padding: 0.75rem;">
+    <p style="font-size: 0.85rem;">
+        Key: <span class="mono">{{ key }}</span> |
+        {% if is_duplicate %}
+        <span class="badge badge-yellow">duplicate</span>
+        {% else %}
+        <span class="badge badge-green">not found</span>
+        {% endif %}
+    </p>
+    {% if metadata %}
+    <pre style="margin-top: 0.5rem; font-size: 0.8rem;">{{ metadata }}</pre>
+    {% endif %}
+</div>
+{% endif %}

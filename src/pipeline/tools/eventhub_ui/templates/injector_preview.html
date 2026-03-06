@@ -1,0 +1,30 @@
+{% if is_valid %}
+<div class="card">
+    <h2 style="margin-top: 0;">Preview</h2>
+    <p style="font-size: 0.85rem; margin-bottom: 0.5rem;">
+        <strong>Target:</strong> <span class="mono">{{ eventhub_name }}</span>
+        {% if partition_key %} | <strong>Partition Key:</strong> <span class="mono">{{ partition_key }}</span>{% endif %}
+        | <strong>Size:</strong> {{ byte_size }} bytes
+    </p>
+    <pre>{{ formatted }}</pre>
+
+    <form style="margin-top: 0.75rem;">
+        <input type="hidden" name="eventhub_name" value="{{ eventhub_name }}">
+        <input type="hidden" name="body" value="{{ body | e }}">
+        <input type="hidden" name="partition_key" value="{{ partition_key }}">
+        <button type="button" class="btn btn-danger"
+                hx-post="/inject/send"
+                hx-include="closest form"
+                hx-target="#inject-result"
+                hx-swap="innerHTML"
+                hx-confirm="Send this message to {{ eventhub_name }}?">
+            Send Message
+        </button>
+    </form>
+</div>
+{% else %}
+<div class="error-box">
+    <strong>Invalid JSON</strong>
+    <p style="margin-top: 0.5rem; font-size: 0.85rem;">{{ formatted }}</p>
+</div>
+{% endif %}

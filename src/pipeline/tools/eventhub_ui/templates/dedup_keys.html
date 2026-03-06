@@ -1,0 +1,23 @@
+{% if keys %}
+<p class="text-muted" style="font-size: 0.8rem; margin-bottom: 0.5rem;">{{ keys | length }} recent key(s) for {{ worker_name }}</p>
+<div style="max-height: 400px; overflow-y: auto;">
+    <table style="font-size: 0.8rem;">
+        <thead>
+            <tr>
+                <th>Key</th>
+                <th>Timestamp</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for key, ts in keys %}
+            <tr>
+                <td class="mono" style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ key }}</td>
+                <td class="mono text-muted">{{ ts | int }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<p class="text-muted" style="font-size: 0.85rem;">No recent keys found for {{ worker_name }}.</p>
+{% endif %}

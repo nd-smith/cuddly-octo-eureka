@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Message Viewer - {{ hub.eventhub_name }}{% endblock %}
+{% block content %}
+<div class="breadcrumb">
+    <a href="/">Overview</a> / {{ hub.eventhub_name }}
+</div>
+
+<h1>Message Viewer</h1>
+<p class="text-muted mb-1">{{ hub.eventhub_name }}</p>
+
+<div class="card">
+    <form id="viewer-form" style="display: flex; gap: 0.75rem; align-items: end; flex-wrap: wrap;">
+        <div class="form-group">
+            <label>EventHub</label>
+            <select name="hub_select" onchange="window.location='/messages/'+this.value">
+                {% for h in hubs %}
+                <option value="{{ h.eventhub_name }}" {% if h.eventhub_name == hub.eventhub_name %}selected{% endif %}>{{ h.eventhub_name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group">
+            <label>Partition</label>
+            <select id="partition-select">
+                <option value="all">All partitions</option>
+                {% for pid in partition_ids %}
+                <option value="{{ pid }}">{{ pid }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group">
+            <label>Start time (UTC)</label>
+            <input type="datetime-local" id="start-time">
+        </div>
+        <div class="form-group">
+            <label>Count</label>
+            <input type="range" id="count-slider" min="1" max="100" value="10" style="width: 120px; vertical-align: middle;">
+            <span id="count-label" class="mono" style="font-size: 0.8rem;">10</span>
+        </div>
+        <button type="button" class="btn btn-primary" onclick="fetchMessages()">Fetch</button>
+        <label style="font-size: 0.8rem; color: var(--text-muted); cursor: pointer;">
+            <input type="checkbox" id="auto-refresh"> Auto-refresh
+        </label>
+    </form>
+</div>
+
+<div id="messages-container">
+    <p class="text-muted">Click "Fetch" to load messages.</p>
+</div>
+
+<script>
+    const slider = document.getElementById('count-slider');
+    const label = document.getElementById('count-label');
+    slider.addEventListener('input', function() { label.textContent = this.value; });
+
+    let refreshTimer = null;
+
+    function fetchMessages() {
+        const partition = document.getElementById('partition-select').value;
+        const startTime = document.getElementById('start-time').value;
+        const count = slider.value;
+
+        let url = '/messages/{{ hub.eventhub_name }}/fetch?partition=' + partition + '&count=' + count;
+        if (startTime) url += '&start_time=' + encodeURIComponent(startTime);
+
+        htmx.ajax('GET', url, {target: '#messages-container', swap: 'innerHTML'});
+    }
+
+    document.getElementById('auto-refresh').addEventListener('change', function() {
+        if (this.checked) {
+            refreshTimer = setInterval(fetchMessages, 15000);
+        } else {
+            clearInterval(refreshTimer);
+            refreshTimer = null;
+        }
+    });
+</script>
+{% endblock %}
