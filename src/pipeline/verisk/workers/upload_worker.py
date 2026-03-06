@@ -227,113 +227,113 @@ class UploadWorker:
 
         initialize_worker_telemetry(self.domain, "upload-worker")
 
-        # Initialize concurrency control
-        self._semaphore = asyncio.Semaphore(self.concurrency)
-        self._shutdown_event = asyncio.Event()
-        self._in_flight_tasks = set()
+        try:
+            # Initialize concurrency control
+            self._semaphore = asyncio.Semaphore(self.concurrency)
+            self._shutdown_event = asyncio.Event()
+            self._in_flight_tasks = set()
 
-        # Start producer
-        await self.producer.start()
+            # Start producer
+            await self.producer.start()
 
-        # Sync topic with producer's actual entity name (Event Hub entity may
-        # differ from the Kafka topic name resolved by get_topic()).
-        if hasattr(self.producer, "eventhub_name"):
-            self.results_topic = self.producer.eventhub_name
+            # Sync topic with producer's actual entity name (Event Hub entity may
+            # differ from the Kafka topic name resolved by get_topic()).
+            if hasattr(self.producer, "eventhub_name"):
+                self.results_topic = self.producer.eventhub_name
 
-        # Initialize storage clients (use injected client or create OneLake clients)
-        if self._injected_storage_client is not None:
-            # Use injected storage client for this domain
-            # The XACT worker supports multi-domain routing, so we need to set it as the domain client
-            self.onelake_clients[self.domain] = self._injected_storage_client
+            # Initialize storage clients (use injected client or create OneLake clients)
+            if self._injected_storage_client is not None:
+                # Use injected storage client for this domain
+                # The XACT worker supports multi-domain routing, so we need to set it as the domain client
+                self.onelake_clients[self.domain] = self._injected_storage_client
 
-            # If the injected client is an async context manager, enter it
-            if hasattr(self._injected_storage_client, "__aenter__"):
-                await self._injected_storage_client.__aenter__()
+                # If the injected client is an async context manager, enter it
+                if hasattr(self._injected_storage_client, "__aenter__"):
+                    await self._injected_storage_client.__aenter__()
 
-            logger.info(
-                "Using injected storage client for domain",
-                extra={
-                    "domain": self.domain,
-                    "storage_type": type(self._injected_storage_client).__name__,
-                },
-            )
-        else:
-            # Initialize OneLake clients for each configured domain
-            for domain, path in self.config.onelake_domain_paths.items():
-                client = OneLakeClient(path, max_pool_size=self.concurrency)
-                await client.__aenter__()
-                self.onelake_clients[domain] = client
                 logger.info(
-                    "Initialized OneLake client for domain",
+                    "Using injected storage client for domain",
                     extra={
-                        "domain": domain,
-                        "onelake_base_path": path,
+                        "domain": self.domain,
+                        "storage_type": type(self._injected_storage_client).__name__,
                     },
                 )
+            else:
+                # Initialize OneLake clients for each configured domain
+                for domain, path in self.config.onelake_domain_paths.items():
+                    client = OneLakeClient(path, max_pool_size=self.concurrency)
+                    await client.__aenter__()
+                    self.onelake_clients[domain] = client
+                    logger.info(
+                        "Initialized OneLake client for domain",
+                        extra={
+                            "domain": domain,
+                            "onelake_base_path": path,
+                        },
+                    )
 
-            # Initialize fallback client if base_path is configured
-            if self.config.onelake_base_path:
-                fallback_client = OneLakeClient(self.config.onelake_base_path, max_pool_size=self.concurrency)
-                await fallback_client.__aenter__()
-                self.onelake_clients["_fallback"] = fallback_client
-                logger.info(
-                    "Initialized fallback OneLake client",
-                    extra={"onelake_base_path": self.config.onelake_base_path},
-                )
+                # Initialize fallback client if base_path is configured
+                if self.config.onelake_base_path:
+                    fallback_client = OneLakeClient(self.config.onelake_base_path, max_pool_size=self.concurrency)
+                    await fallback_client.__aenter__()
+                    self.onelake_clients["_fallback"] = fallback_client
+                    logger.info(
+                        "Initialized fallback OneLake client",
+                        extra={"onelake_base_path": self.config.onelake_base_path},
+                    )
 
-        # Size the default thread pool to match upload concurrency so
-        # asyncio.to_thread calls (OneLake uploads, file I/O) aren't bottlenecked
-        # by the default min(32, cpu+4) executor.
-        import concurrent.futures
+            # Size the default thread pool to match upload concurrency so
+            # asyncio.to_thread calls (OneLake uploads, file I/O) aren't bottlenecked
+            # by the default min(32, cpu+4) executor.
+            import concurrent.futures
 
-        loop = asyncio.get_running_loop()
-        loop.set_default_executor(
-            concurrent.futures.ThreadPoolExecutor(max_workers=self.concurrency + 4)
-        )
+            loop = asyncio.get_running_loop()
+            loop.set_default_executor(
+                concurrent.futures.ThreadPoolExecutor(max_workers=self.concurrency + 4)
+            )
 
-        # Create batch consumer from transport layer
-        self._consumer = await create_batch_consumer(
-            config=self.config,
-            domain=self.domain,
-            worker_name=self.WORKER_NAME,
-            topics=self.topics,
-            batch_handler=self._process_batch,
-            topic_key="downloads_cached",
-            consumer_config=ConsumerConfig(
-                batch_size=self.batch_size,
-                batch_timeout_ms=1000,
-                instance_id=self.instance_id,
-            ),
-        )
+            # Create batch consumer from transport layer
+            self._consumer = await create_batch_consumer(
+                config=self.config,
+                domain=self.domain,
+                worker_name=self.WORKER_NAME,
+                topics=self.topics,
+                batch_handler=self._process_batch,
+                topic_key="downloads_cached",
+                consumer_config=ConsumerConfig(
+                    batch_size=self.batch_size,
+                    batch_timeout_ms=1000,
+                    instance_id=self.instance_id,
+                ),
+            )
 
-        self._consumer_group = self.config.get_consumer_group(self.domain, self.WORKER_NAME)
-        self._running = True
+            self._consumer_group = self.config.get_consumer_group(self.domain, self.WORKER_NAME)
+            self._running = True
 
-        # Start periodic stats logger
-        self._stats_logger = PeriodicStatsLogger(
-            interval_seconds=self.CYCLE_LOG_INTERVAL_SECONDS,
-            get_stats=self._get_cycle_stats,
-            stage="upload",
-            worker_id=self.worker_id,
-        )
-        self._stats_logger.start()
+            # Start periodic stats logger
+            self._stats_logger = PeriodicStatsLogger(
+                interval_seconds=self.CYCLE_LOG_INTERVAL_SECONDS,
+                get_stats=self._get_cycle_stats,
+                stage="upload",
+                worker_id=self.worker_id,
+            )
+            self._stats_logger.start()
 
-        # Update health check readiness
-        self.health_server.set_ready(transport_connected=True)
+            # Update health check readiness
+            self.health_server.set_ready(transport_connected=True)
 
-        # Update connection status
-        update_connection_status("consumer", connected=True)
+            # Update connection status
+            update_connection_status("consumer", connected=True)
 
-        await self._stale_cleaner.start()
+            await self._stale_cleaner.start()
 
-        logger.info("Upload worker started successfully")
+            logger.info("Upload worker started successfully")
 
-        try:
             await self._consumer.start()
         except asyncio.CancelledError:
-            logger.info("Upload worker cancelled")
-        except Exception as e:
-            logger.exception("Upload worker error", extra={"error": str(e)})
+            raise
+        except Exception:
+            await self.stop()
             raise
         finally:
             self._running = False

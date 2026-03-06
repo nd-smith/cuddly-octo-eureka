@@ -273,76 +273,71 @@ class DownloadWorker:
             await asyncio.sleep(0)
             self._http_session = None
 
-        self._http_session = self._create_http_session()
-        self.downloader = AttachmentDownloader(session=self._http_session)
-
-        await self.producer.start()
-
-        # Sync topic with producer's actual entity name (Event Hub entity may
-        # differ from the Kafka topic name resolved by get_topic()).
-        if hasattr(self.producer, "eventhub_name"):
-            self.cached_topic = self.producer.eventhub_name
-
-        await self.results_producer.start()
-
-        if hasattr(self.results_producer, "eventhub_name"):
-            self.results_topic = self.results_producer.eventhub_name
-
-        self.retry_handler = RetryHandler(self.config)
-        await self.retry_handler.start()
-
-        # Create batch consumer from transport layer
-        self._consumer = await create_batch_consumer(
-            config=self.config,
-            domain=self.domain,
-            worker_name=self.WORKER_NAME,
-            topics=self.topics,
-            batch_handler=self._process_batch,
-            topic_key="downloads_pending",
-            consumer_config=ConsumerConfig(
-                batch_size=self.batch_size,
-                batch_timeout_ms=1000,
-                instance_id=self.instance_id,
-            ),
-        )
-        self._consumer_group = self.config.get_consumer_group(self.domain, self.WORKER_NAME)
-
-        self._running = True
-        self._initialized = True
-
-        self._stats_logger = PeriodicStatsLogger(
-            interval_seconds=self.CYCLE_LOG_INTERVAL_SECONDS,
-            get_stats=self._get_cycle_stats,
-            stage="download",
-            worker_id=self.worker_id,
-        )
-        self._stats_logger.start()
-
-        self.health_server.set_ready(transport_connected=True)
-
-        # Update metrics
-        update_connection_status("consumer", connected=True)
-
-        await self._stale_cleaner.start()
-
-        logger.info(
-            "Download worker started successfully",
-            extra={
-                "topics": self.topics,
-            },
-        )
-
         try:
+            self._http_session = self._create_http_session()
+            self.downloader = AttachmentDownloader(session=self._http_session)
+
+            await self.producer.start()
+
+            # Sync topic with producer's actual entity name (Event Hub entity may
+            # differ from the Kafka topic name resolved by get_topic()).
+            if hasattr(self.producer, "eventhub_name"):
+                self.cached_topic = self.producer.eventhub_name
+
+            await self.results_producer.start()
+
+            if hasattr(self.results_producer, "eventhub_name"):
+                self.results_topic = self.results_producer.eventhub_name
+
+            self.retry_handler = RetryHandler(self.config)
+            await self.retry_handler.start()
+
+            # Create batch consumer from transport layer
+            self._consumer = await create_batch_consumer(
+                config=self.config,
+                domain=self.domain,
+                worker_name=self.WORKER_NAME,
+                topics=self.topics,
+                batch_handler=self._process_batch,
+                topic_key="downloads_pending",
+                consumer_config=ConsumerConfig(
+                    batch_size=self.batch_size,
+                    batch_timeout_ms=1000,
+                    instance_id=self.instance_id,
+                ),
+            )
+            self._consumer_group = self.config.get_consumer_group(self.domain, self.WORKER_NAME)
+
+            self._running = True
+            self._initialized = True
+
+            self._stats_logger = PeriodicStatsLogger(
+                interval_seconds=self.CYCLE_LOG_INTERVAL_SECONDS,
+                get_stats=self._get_cycle_stats,
+                stage="download",
+                worker_id=self.worker_id,
+            )
+            self._stats_logger.start()
+
+            self.health_server.set_ready(transport_connected=True)
+
+            # Update metrics
+            update_connection_status("consumer", connected=True)
+
+            await self._stale_cleaner.start()
+
+            logger.info(
+                "Download worker started successfully",
+                extra={
+                    "topics": self.topics,
+                },
+            )
+
             await self._consumer.start()
         except asyncio.CancelledError:
-            logger.info("Worker cancelled, shutting down")
             raise
-        except Exception as e:
-            logger.error(
-                "Worker terminated with error",
-                extra={"error": str(e)},
-                exc_info=True,
-            )
+        except Exception:
+            await self.stop()
             raise
         finally:
             self._running = False

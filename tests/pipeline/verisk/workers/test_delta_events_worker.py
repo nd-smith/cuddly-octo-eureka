@@ -196,7 +196,7 @@ class TestDeltaEventsWorkerLifecycle:
 
                 # Verify components were initialized
                 assert worker._running is False  # Reset in finally
-                assert worker.consumer is not None
+                assert worker.consumer is None  # stop() cleans up resources
 
     @pytest.mark.asyncio
     async def test_stop_flushes_pending_batch(self, mock_config, mock_producer):

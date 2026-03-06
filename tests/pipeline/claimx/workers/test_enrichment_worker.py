@@ -233,7 +233,7 @@ class TestEnrichmentWorkerLifecycle:
             await worker.start()
 
             # Verify components initialized
-            assert worker._running is True
+            assert worker._running is False
             assert mock_api_client._ensure_session.called
             assert mock_producer.start.called
 

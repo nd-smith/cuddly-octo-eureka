@@ -183,39 +183,41 @@ class ClaimXResultProcessor:
 
         initialize_worker_telemetry(self.domain, "result-processor")
 
-        # Create and start consumer with message handler
-        # Disable auto-commit to allow manual commit after batch write
-        self.consumer = await create_consumer(
-            config=self.config,
-            domain=self.domain,
-            worker_name=self.worker_name,
-            topics=[self.results_topic],
-            message_handler=self._handle_result_message,
-            topic_key="downloads_results",
-            consumer_config=ConsumerConfig(
-                enable_message_commit=False,
-                instance_id=self.instance_id,
-            ),
-        )
-
-        # Start periodic background tasks
-        self._stats_logger = PeriodicStatsLogger(
-            interval_seconds=30,
-            get_stats=self._get_cycle_stats,
-            stage="result_processing",
-            worker_id=self.worker_id,
-        )
-        self._stats_logger.start()
-        self._flush_task = asyncio.create_task(self._periodic_flush())
-
-        # Update health check readiness
-        self.health_server.set_ready(transport_connected=True)
-
         try:
+            # Create and start consumer with message handler
+            # Disable auto-commit to allow manual commit after batch write
+            self.consumer = await create_consumer(
+                config=self.config,
+                domain=self.domain,
+                worker_name=self.worker_name,
+                topics=[self.results_topic],
+                message_handler=self._handle_result_message,
+                topic_key="downloads_results",
+                consumer_config=ConsumerConfig(
+                    enable_message_commit=False,
+                    instance_id=self.instance_id,
+                ),
+            )
+
+            # Start periodic background tasks
+            self._stats_logger = PeriodicStatsLogger(
+                interval_seconds=30,
+                get_stats=self._get_cycle_stats,
+                stage="result_processing",
+                worker_id=self.worker_id,
+            )
+            self._stats_logger.start()
+            self._flush_task = asyncio.create_task(self._periodic_flush())
+
+            # Update health check readiness
+            self.health_server.set_ready(transport_connected=True)
+
             # Start consumer (this blocks until stopped)
             await self.consumer.start()
         except asyncio.CancelledError:
-            logger.info("ClaimXResultProcessor cancelled, shutting down...")
+            raise
+        except Exception:
+            await self.stop()
             raise
         finally:
             self._running = False

@@ -217,102 +217,97 @@ class ClaimXDownloadWorker:
         # Close resources from a previous failed start attempt to prevent leak.
         await self._cleanup_stale_resources()
 
-        connector = aiohttp.TCPConnector(
-            limit=self.concurrency,
-            limit_per_host=self.concurrency,
-            ttl_dns_cache=300,
-            enable_cleanup_closed=True,
-        )
-
-        timeout = aiohttp.ClientTimeout(
-            total=300,
-            connect=30,
-            sock_read=60,
-            sock_connect=30,
-        )
-
-        self._http_session = aiohttp.ClientSession(
-            connector=connector,
-            timeout=timeout,
-        )
-
-        self.downloader = AttachmentDownloader(session=self._http_session)
-
-        await self.producer.start()
-
-        if hasattr(self.producer, "eventhub_name"):
-            self.cached_topic = self.producer.eventhub_name
-
-        self.api_client = ClaimXApiClient(
-            base_url=self.config.claimx_api_url or "https://api.test.claimxperience.com",
-            token=self.config.claimx_api_token,
-            timeout_seconds=self.config.claimx_api_timeout_seconds,
-            max_concurrent=self.config.claimx_api_concurrency,
-        )
-
-        self.retry_handler = DownloadRetryHandler(
-            config=self.config,
-            api_client=self.api_client,
-        )
-        await self.retry_handler.start()
-
-        # Create batch consumer from transport layer
-        # The consumer will call _process_batch() for each batch of messages
-        self._consumer = await create_batch_consumer(
-            config=self.config,
-            domain=self.domain,
-            worker_name=self.WORKER_NAME,
-            topics=self.topics,
-            batch_handler=self._process_batch,
-            topic_key="downloads_pending",
-            consumer_config=ConsumerConfig(
-                batch_size=self.batch_size,
-                batch_timeout_ms=1000,
-                instance_id=self.instance_id,
-            ),
-        )
-
-        self._consumer_group = self.config.get_consumer_group(self.domain, self.WORKER_NAME)
-        self._running = True
-
-        self._stats_logger = PeriodicStatsLogger(
-            interval_seconds=CYCLE_LOG_INTERVAL_SECONDS,
-            get_stats=self._get_cycle_stats,
-            stage="download",
-            worker_id=self.worker_id,
-        )
-        self._stats_logger.start()
-
-        api_reachable = not self.api_client.is_circuit_open
-        self.health_server.set_ready(
-            transport_connected=True,
-            api_reachable=api_reachable,
-            circuit_open=self.api_client.is_circuit_open,
-        )
-
-        await self._stale_cleaner.start()
-
-        logger.info(
-            "ClaimX download worker started successfully",
-            extra={
-                "topics": self.topics,
-                "batch_size": self.batch_size,
-                "concurrency": self.concurrency,
-            },
-        )
-
         try:
+            connector = aiohttp.TCPConnector(
+                limit=self.concurrency,
+                limit_per_host=self.concurrency,
+                ttl_dns_cache=300,
+                enable_cleanup_closed=True,
+            )
+
+            timeout = aiohttp.ClientTimeout(
+                total=300,
+                connect=30,
+                sock_read=60,
+                sock_connect=30,
+            )
+
+            self._http_session = aiohttp.ClientSession(
+                connector=connector,
+                timeout=timeout,
+            )
+
+            self.downloader = AttachmentDownloader(session=self._http_session)
+
+            await self.producer.start()
+
+            if hasattr(self.producer, "eventhub_name"):
+                self.cached_topic = self.producer.eventhub_name
+
+            self.api_client = ClaimXApiClient(
+                base_url=self.config.claimx_api_url or "https://api.test.claimxperience.com",
+                token=self.config.claimx_api_token,
+                timeout_seconds=self.config.claimx_api_timeout_seconds,
+                max_concurrent=self.config.claimx_api_concurrency,
+            )
+
+            self.retry_handler = DownloadRetryHandler(
+                config=self.config,
+                api_client=self.api_client,
+            )
+            await self.retry_handler.start()
+
+            # Create batch consumer from transport layer
+            # The consumer will call _process_batch() for each batch of messages
+            self._consumer = await create_batch_consumer(
+                config=self.config,
+                domain=self.domain,
+                worker_name=self.WORKER_NAME,
+                topics=self.topics,
+                batch_handler=self._process_batch,
+                topic_key="downloads_pending",
+                consumer_config=ConsumerConfig(
+                    batch_size=self.batch_size,
+                    batch_timeout_ms=1000,
+                    instance_id=self.instance_id,
+                ),
+            )
+
+            self._consumer_group = self.config.get_consumer_group(self.domain, self.WORKER_NAME)
+            self._running = True
+
+            self._stats_logger = PeriodicStatsLogger(
+                interval_seconds=CYCLE_LOG_INTERVAL_SECONDS,
+                get_stats=self._get_cycle_stats,
+                stage="download",
+                worker_id=self.worker_id,
+            )
+            self._stats_logger.start()
+
+            api_reachable = not self.api_client.is_circuit_open
+            self.health_server.set_ready(
+                transport_connected=True,
+                api_reachable=api_reachable,
+                circuit_open=self.api_client.is_circuit_open,
+            )
+
+            await self._stale_cleaner.start()
+
+            logger.info(
+                "ClaimX download worker started successfully",
+                extra={
+                    "topics": self.topics,
+                    "batch_size": self.batch_size,
+                    "concurrency": self.concurrency,
+                },
+            )
+
             # Transport layer handles the consume loop
             await self._consumer.start()
         except asyncio.CancelledError:
-            logger.info("Worker cancelled, shutting down")
             raise
-        except Exception as e:
-            logger.error(
-                "Worker terminated with error",
-                extra={"error": str(e)},
-                exc_info=True,
-            )
+        except Exception:
+            await self.stop()
             raise
         finally:
             self._running = False

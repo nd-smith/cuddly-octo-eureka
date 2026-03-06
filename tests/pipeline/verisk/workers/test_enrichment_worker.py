@@ -164,7 +164,7 @@ class TestXACTEnrichmentWorkerLifecycle:
                 await worker.start()
 
             # Verify components initialized
-            assert worker._running is True
+            assert worker._running is False
             assert mock_producer.start.called
 
     @pytest.mark.asyncio

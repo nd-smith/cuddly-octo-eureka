@@ -119,7 +119,7 @@ class TestEventIngesterWorkerInitialization:
         assert isinstance(worker._dedup_cache, OrderedDict)
         assert len(worker._dedup_cache) == 0
         assert worker._dedup_cache_ttl_seconds == 86400  # 24 hours
-        assert worker._dedup_cache_max_size == 100_000
+        assert worker._dedup_cache_max_size == 200_000
 
     def test_metrics_initialized_to_zero(self, mock_config):
         """Worker initializes metrics to zero."""
@@ -160,9 +160,7 @@ class TestEventIngesterWorkerLifecycle:
             with contextlib.suppress(Exception):
                 await worker.start()
 
-            # Verify components were initialized (even though _running is reset in finally)
-            assert worker.producer is not None
-            assert worker.consumer is not None
+            # Verify components were created and started (stop() cleans up on failure)
             assert mock_producer.start.called
 
     @pytest.mark.asyncio
@@ -566,23 +564,23 @@ class TestEventIngesterWorkerDedupSourceTracking:
 class TestEventIngesterWorkerBatchSizeAdjustment:
     """Test backfill prefetch mode batch size adjustment."""
 
-    def test_adjust_to_backfill_size_when_events_are_old(self, mock_config):
-        """Batch size increases to BACKFILL_BATCH_SIZE for stale events."""
+    def test_adjust_to_backfill_size_when_batch_is_full(self, mock_config):
+        """Batch size increases to BACKFILL_BATCH_SIZE when batch is full."""
         worker = EventIngesterWorker(config=mock_config)
         worker.consumer = Mock()
         worker.consumer.batch_size = worker.REALTIME_BATCH_SIZE
 
-        worker._adjust_batch_size(event_age_seconds=7200)  # 2 hours old
+        worker._adjust_batch_size(batch_record_count=worker.REALTIME_BATCH_SIZE)
 
         assert worker.consumer.batch_size == worker.BACKFILL_BATCH_SIZE
 
-    def test_adjust_to_realtime_size_when_events_are_fresh(self, mock_config):
-        """Batch size decreases to REALTIME_BATCH_SIZE for recent events."""
+    def test_adjust_to_realtime_size_when_batch_is_partial(self, mock_config):
+        """Batch size decreases to REALTIME_BATCH_SIZE for partial batches."""
         worker = EventIngesterWorker(config=mock_config)
         worker.consumer = Mock()
         worker.consumer.batch_size = worker.BACKFILL_BATCH_SIZE
 
-        worker._adjust_batch_size(event_age_seconds=60)  # 1 minute old
+        worker._adjust_batch_size(batch_record_count=10)
 
         assert worker.consumer.batch_size == worker.REALTIME_BATCH_SIZE
 
@@ -592,7 +590,7 @@ class TestEventIngesterWorkerBatchSizeAdjustment:
         worker.consumer = Mock()
         worker.consumer.batch_size = worker.REALTIME_BATCH_SIZE
 
-        worker._adjust_batch_size(event_age_seconds=60)
+        worker._adjust_batch_size(batch_record_count=10)
 
         # batch_size setter should not have been called (already correct)
         assert worker.consumer.batch_size == worker.REALTIME_BATCH_SIZE
@@ -603,10 +601,9 @@ class TestEventIngesterWorkerBatchSizeAdjustment:
         worker.consumer = None
 
         # Should not raise
-        worker._adjust_batch_size(event_age_seconds=7200)
+        worker._adjust_batch_size(batch_record_count=200)
 
     def test_constants_have_expected_values(self, mock_config):
         """Verify backfill constants."""
         assert EventIngesterWorker.BACKFILL_BATCH_SIZE == 2000
         assert EventIngesterWorker.REALTIME_BATCH_SIZE == 100
-        assert EventIngesterWorker.BACKFILL_THRESHOLD_SECONDS == 3600

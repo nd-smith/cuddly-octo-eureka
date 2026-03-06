@@ -184,9 +184,9 @@ class TestEntityDeltaWorkerLifecycle:
             with contextlib.suppress(Exception):
                 await worker.start()
 
-            # Verify components were initialized
-            assert worker.retry_handler is not None
-            assert worker._consumer is not None
+            # Verify start() was attempted (stop() cleans up resources on failure)
+            assert worker.retry_handler is None  # stop() cleans up
+            assert worker._consumer is None  # stop() cleans up
 
     @pytest.mark.asyncio
     async def test_stop_flushes_pending_batch(self, mock_config):

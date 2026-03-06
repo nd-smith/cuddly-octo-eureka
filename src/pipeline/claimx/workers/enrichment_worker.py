@@ -245,37 +245,46 @@ class ClaimXEnrichmentWorker:
 
     async def _init_producers(self) -> None:
         """Create and start Kafka producers."""
-        self.producer = create_producer(
-            config=self.producer_config,
-            domain=self.domain,
-            worker_name="enrichment_worker",
-            topic_key="enriched",
-        )
-        await self.producer.start()
+        started: list[str] = []
+        try:
+            self.producer = create_producer(
+                config=self.producer_config,
+                domain=self.domain,
+                worker_name="enrichment_worker",
+                topic_key="enriched",
+            )
+            await self.producer.start()
+            started.append("producer")
 
-        self.download_producer = create_producer(
-            config=self.producer_config,
-            domain=self.domain,
-            worker_name="enrichment_worker",
-            topic_key="downloads_pending",
-        )
-        await self.download_producer.start()
+            self.download_producer = create_producer(
+                config=self.producer_config,
+                domain=self.domain,
+                worker_name="enrichment_worker",
+                topic_key="downloads_pending",
+            )
+            await self.download_producer.start()
+            started.append("download_producer")
 
-        self.task_event_producer = create_producer(
-            config=self.producer_config,
-            domain=self.domain,
-            worker_name="enrichment_worker",
-            topic_key="task_events",
-        )
-        await self.task_event_producer.start()
+            self.task_event_producer = create_producer(
+                config=self.producer_config,
+                domain=self.domain,
+                worker_name="enrichment_worker",
+                topic_key="task_events",
+            )
+            await self.task_event_producer.start()
+            started.append("task_event_producer")
 
-        self.video_event_producer = create_producer(
-            config=self.producer_config,
-            domain=self.domain,
-            worker_name="enrichment_worker",
-            topic_key="video_events",
-        )
-        await self.video_event_producer.start()
+            self.video_event_producer = create_producer(
+                config=self.producer_config,
+                domain=self.domain,
+                worker_name="enrichment_worker",
+                topic_key="video_events",
+            )
+            await self.video_event_producer.start()
+        except Exception:
+            for attr in reversed(started):
+                await self._close_resource(attr)
+            raise
 
     # Task IDs that route to the ITEL cabinet pending topic
     ITEL_TASK_IDS = {32615, 1234}
@@ -332,38 +341,38 @@ class ClaimXEnrichmentWorker:
 
         await self._cleanup_stale_resources()
 
-        self._stats_logger = PeriodicStatsLogger(
-            interval_seconds=CYCLE_LOG_INTERVAL_SECONDS,
-            get_stats=self._get_cycle_stats,
-            stage="enrichment",
-            worker_id=self.worker_id,
-        )
-        self._stats_logger.start()
-
-        self._init_api_client()
-        await self.api_client._ensure_session()
-
-        api_reachable = not self.api_client.is_circuit_open
-        self.health_server.set_ready(transport_connected=False, api_reachable=api_reachable)
-
-        await self._init_producers()
-
-        self.retry_handler = EnrichmentRetryHandler(config=self.consumer_config)
-        await self.retry_handler.start()
-        logger.info(
-            "Retry handler initialized",
-            extra={
-                "retry_topics": [t for t in self.topics if "retry" in t],
-                "dlq_topic": self.retry_handler.dlq_topic,
-            },
-        )
-
-        await self._init_itel_routing()
-
-        if self._preload_cache_from_delta:
-            await self._preload_project_cache()
-
         try:
+            self._stats_logger = PeriodicStatsLogger(
+                interval_seconds=CYCLE_LOG_INTERVAL_SECONDS,
+                get_stats=self._get_cycle_stats,
+                stage="enrichment",
+                worker_id=self.worker_id,
+            )
+            self._stats_logger.start()
+
+            self._init_api_client()
+            await self.api_client._ensure_session()
+
+            api_reachable = not self.api_client.is_circuit_open
+            self.health_server.set_ready(transport_connected=False, api_reachable=api_reachable)
+
+            await self._init_producers()
+
+            self.retry_handler = EnrichmentRetryHandler(config=self.consumer_config)
+            await self.retry_handler.start()
+            logger.info(
+                "Retry handler initialized",
+                extra={
+                    "retry_topics": [t for t in self.topics if "retry" in t],
+                    "dlq_topic": self.retry_handler.dlq_topic,
+                },
+            )
+
+            await self._init_itel_routing()
+
+            if self._preload_cache_from_delta:
+                await self._preload_project_cache()
+
             self.consumer = await create_batch_consumer(
                 config=self.consumer_config,
                 domain=self.domain,
@@ -387,11 +396,12 @@ class ClaimXEnrichmentWorker:
             await self.consumer.start()
 
         except asyncio.CancelledError:
-            logger.info("Worker cancelled during startup/run")
             raise
         except Exception:
-            self._running = False
+            await self.stop()
             raise
+        finally:
+            self._running = False
 
     async def _close_resource(self, attr_name: str, action: str = "stop") -> None:
         """Close a resource by attribute name, logging errors and clearing the reference."""

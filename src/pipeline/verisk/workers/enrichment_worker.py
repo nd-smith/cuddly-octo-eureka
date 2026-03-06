@@ -156,48 +156,48 @@ class XACTEnrichmentWorker:
 
         initialize_worker_telemetry(self.domain, "enrichment-worker")
 
-        self._stats_logger = PeriodicStatsLogger(
-            interval_seconds=self.CYCLE_LOG_INTERVAL_SECONDS,
-            get_stats=self._get_cycle_stats,
-            stage="enrichment",
-            worker_id=self.worker_id,
-        )
-        self._stats_logger.start()
+        try:
+            self._stats_logger = PeriodicStatsLogger(
+                interval_seconds=self.CYCLE_LOG_INTERVAL_SECONDS,
+                get_stats=self._get_cycle_stats,
+                stage="enrichment",
+                worker_id=self.worker_id,
+            )
+            self._stats_logger.start()
 
-        self.producer = create_producer(
-            config=self.producer_config,
-            domain=self.domain,
-            worker_name="enrichment_worker",
-            topic_key="downloads_pending",
-        )
-        await self.producer.start()
-
-        # Sync topic with producer's actual entity name (Event Hub entity may
-        # differ from the Kafka topic name resolved by get_topic()).
-        if hasattr(self.producer, "eventhub_name"):
-            self.download_topic = self.producer.eventhub_name
-
-        self.event_handler_runner = EventHandlerRunner(
-            producer_factory=lambda topic_key: create_producer(
+            self.producer = create_producer(
                 config=self.producer_config,
                 domain=self.domain,
                 worker_name="enrichment_worker",
-                topic_key=topic_key,
-            ),
-        )
+                topic_key="downloads_pending",
+            )
+            await self.producer.start()
 
-        self.retry_handler = RetryHandler(
-            config=self.consumer_config,
-        )
-        await self.retry_handler.start()
-        logger.info(
-            "Retry handler initialized",
-            extra={
-                "dlq_topic": self.retry_handler.dlq_topic,
-            },
-        )
+            # Sync topic with producer's actual entity name (Event Hub entity may
+            # differ from the Kafka topic name resolved by get_topic()).
+            if hasattr(self.producer, "eventhub_name"):
+                self.download_topic = self.producer.eventhub_name
 
-        try:
+            self.event_handler_runner = EventHandlerRunner(
+                producer_factory=lambda topic_key: create_producer(
+                    config=self.producer_config,
+                    domain=self.domain,
+                    worker_name="enrichment_worker",
+                    topic_key=topic_key,
+                ),
+            )
+
+            self.retry_handler = RetryHandler(
+                config=self.consumer_config,
+            )
+            await self.retry_handler.start()
+            logger.info(
+                "Retry handler initialized",
+                extra={
+                    "dlq_topic": self.retry_handler.dlq_topic,
+                },
+            )
+
             self.consumer = await create_consumer(
                 config=self.consumer_config,
                 domain=self.domain,
@@ -211,13 +211,13 @@ class XACTEnrichmentWorker:
             self.health_server.set_ready(transport_connected=True)
 
             await self.consumer.start()
-
         except asyncio.CancelledError:
-            logger.info("Worker cancelled during startup/run")
             raise
         except Exception:
-            self._running = False
+            await self.stop()
             raise
+        finally:
+            self._running = False
 
     @staticmethod
     async def _stop_component(

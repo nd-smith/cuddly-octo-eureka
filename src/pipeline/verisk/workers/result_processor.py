@@ -236,49 +236,44 @@ class ResultProcessor:
 
         initialize_worker_telemetry(self.domain, "result-processor")
 
-        # Start retry handler producers
-        await self._retry_handler.start()
-
-        # Create consumer via transport factory (Event Hub support)
-        self._consumer = await create_consumer(
-            config=self.config,
-            domain=self.domain,
-            worker_name=self.worker_name,
-            topics=[self._results_topic],
-            message_handler=self._handle_result,
-            topic_key="downloads_results",
-            consumer_config=ConsumerConfig(
-                enable_message_commit=False,
-                instance_id=self.instance_id,
-                on_partition_revoked=self._on_partition_revoked,
-            ),
-        )
-
-        # Start periodic background tasks
-        self._stats_logger = PeriodicStatsLogger(
-            interval_seconds=self.CYCLE_LOG_INTERVAL_SECONDS,
-            get_stats=self._get_cycle_stats,
-            stage="result_processing",
-            worker_id=self.worker_id,
-        )
-        self._stats_logger.start()
-        self._flush_task = asyncio.create_task(self._periodic_flush())
-
-        # Update health check readiness
-        self.health_server.set_ready(transport_connected=True)
-
         try:
+            # Start retry handler producers
+            await self._retry_handler.start()
+
+            # Create consumer via transport factory (Event Hub support)
+            self._consumer = await create_consumer(
+                config=self.config,
+                domain=self.domain,
+                worker_name=self.worker_name,
+                topics=[self._results_topic],
+                message_handler=self._handle_result,
+                topic_key="downloads_results",
+                consumer_config=ConsumerConfig(
+                    enable_message_commit=False,
+                    instance_id=self.instance_id,
+                    on_partition_revoked=self._on_partition_revoked,
+                ),
+            )
+
+            # Start periodic background tasks
+            self._stats_logger = PeriodicStatsLogger(
+                interval_seconds=self.CYCLE_LOG_INTERVAL_SECONDS,
+                get_stats=self._get_cycle_stats,
+                stage="result_processing",
+                worker_id=self.worker_id,
+            )
+            self._stats_logger.start()
+            self._flush_task = asyncio.create_task(self._periodic_flush())
+
+            # Update health check readiness
+            self.health_server.set_ready(transport_connected=True)
+
             # Start consumer (blocks until stopped)
             await self._consumer.start()
         except asyncio.CancelledError:
-            logger.info("Result processor cancelled, shutting down")
             raise
-        except Exception as e:
-            logger.error(
-                "Result processor terminated with error",
-                extra={"error": str(e)},
-                exc_info=True,
-            )
+        except Exception:
+            await self.stop()
             raise
         finally:
             self._running = False

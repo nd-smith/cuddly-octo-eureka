@@ -162,70 +162,72 @@ class ClaimXEventIngesterWorker:
 
         initialize_worker_telemetry(self.domain, "event-ingester")
 
-        self._stats_logger = PeriodicStatsLogger(
-            interval_seconds=30,
-            get_stats=self._get_cycle_stats,
-            stage="ingestion",
-            worker_id=self.worker_id,
-        )
-        self._stats_logger.start()
-
-        # Initialize dedup subsystem
-        self._dedup_enabled = is_dedup_enabled()
-        if not self._dedup_enabled:
-            logger.info("Dedup disabled via config")
-        else:
-            self._dedup_store = await get_dedup_store()
-            if self._dedup_store:
-                logger.info("Persistent dedup store enabled")
-                try:
-                    await asyncio.wait_for(self._prewarm_dedup_cache(), timeout=30.0)
-                except asyncio.TimeoutError:
-                    logger.warning(
-                        "Dedup cache prewarm timed out — continuing with empty cache",
-                        extra={"timeout_seconds": 30},
-                    )
-            else:
-                logger.info("Persistent dedup store not configured - using memory-only deduplication")
-
-        self.producer = create_producer(
-            config=self.producer_config,
-            domain=self.domain,
-            worker_name="event_ingester",
-            topic_key="enrichment_pending",
-        )
-        await self.producer.start()
-
-        if hasattr(self.producer, "eventhub_name"):
-            self.enrichment_topic = self.producer.eventhub_name
-
-        # Start periodic dedup cache cleanup (every 60s)
-        if self._dedup_enabled:
-            self._dedup_cleanup_task = asyncio.create_task(self._periodic_dedup_cleanup())
-
-        self.consumer = await create_batch_consumer(
-            config=self.consumer_config,
-            domain=self.domain,
-            worker_name="event_ingester",
-            topics=[self.consumer_config.get_topic(self.domain, "events")],
-            batch_handler=self._handle_event_batch,
-            topic_key="events",
-            connection_string=get_source_connection_string(),
-            consumer_config=ConsumerConfig(
-                batch_size=self.REALTIME_BATCH_SIZE,
-                max_batch_size=self.BACKFILL_BATCH_SIZE,
-                batch_timeout_ms=500,
-                prefetch=3000,
-            ),
-            health_server=self.health_server,
-        )
-
-        self.health_server.set_ready(transport_connected=True, api_reachable=True)
-
         try:
+            self._stats_logger = PeriodicStatsLogger(
+                interval_seconds=30,
+                get_stats=self._get_cycle_stats,
+                stage="ingestion",
+                worker_id=self.worker_id,
+            )
+            self._stats_logger.start()
+
+            # Initialize dedup subsystem
+            self._dedup_enabled = is_dedup_enabled()
+            if not self._dedup_enabled:
+                logger.info("Dedup disabled via config")
+            else:
+                self._dedup_store = await get_dedup_store()
+                if self._dedup_store:
+                    logger.info("Persistent dedup store enabled")
+                    try:
+                        await asyncio.wait_for(self._prewarm_dedup_cache(), timeout=30.0)
+                    except asyncio.TimeoutError:
+                        logger.warning(
+                            "Dedup cache prewarm timed out — continuing with empty cache",
+                            extra={"timeout_seconds": 30},
+                        )
+                else:
+                    logger.info("Persistent dedup store not configured - using memory-only deduplication")
+
+            self.producer = create_producer(
+                config=self.producer_config,
+                domain=self.domain,
+                worker_name="event_ingester",
+                topic_key="enrichment_pending",
+            )
+            await self.producer.start()
+
+            if hasattr(self.producer, "eventhub_name"):
+                self.enrichment_topic = self.producer.eventhub_name
+
+            # Start periodic dedup cache cleanup (every 60s)
+            if self._dedup_enabled:
+                self._dedup_cleanup_task = asyncio.create_task(self._periodic_dedup_cleanup())
+
+            self.consumer = await create_batch_consumer(
+                config=self.consumer_config,
+                domain=self.domain,
+                worker_name="event_ingester",
+                topics=[self.consumer_config.get_topic(self.domain, "events")],
+                batch_handler=self._handle_event_batch,
+                topic_key="events",
+                connection_string=get_source_connection_string(),
+                consumer_config=ConsumerConfig(
+                    batch_size=self.REALTIME_BATCH_SIZE,
+                    max_batch_size=self.BACKFILL_BATCH_SIZE,
+                    batch_timeout_ms=500,
+                    prefetch=3000,
+                ),
+                health_server=self.health_server,
+            )
+
+            self.health_server.set_ready(transport_connected=True, api_reachable=True)
+
             await self.consumer.start()
         except asyncio.CancelledError:
-            logger.info("ClaimXEventIngesterWorker cancelled, shutting down...")
+            raise
+        except Exception:
+            await self.stop()
             raise
         finally:
             self._running = False

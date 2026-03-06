@@ -196,41 +196,46 @@ class ClaimXDeltaEventsWorker:
             finally:
                 self._stats_logger = None
 
-        # Start retry handler producers
-        await self.retry_handler.start()
-
-        # Start cycle output background task
-        self._stats_logger = PeriodicStatsLogger(
-            interval_seconds=self.CYCLE_LOG_INTERVAL_SECONDS,
-            get_stats=self._get_cycle_stats,
-            stage="delta_write",
-            worker_id=self.worker_id,
-        )
-        self._stats_logger.start()
-
-        # Start batch timer
-        self._reset_batch_timer()
-
-        # Create and start consumer on enrichment_pending topic (already deduplicated)
-        # Disable per-message commits - we commit after batch writes
-        self.consumer = await create_consumer(
-            config=self.config,
-            domain=self.domain,
-            worker_name="delta_events_writer",
-            topics=[self.config.get_topic(self.domain, "enrichment_pending")],
-            message_handler=self._handle_event_message,
-            topic_key="enrichment_pending",
-            consumer_config=ConsumerConfig(
-                enable_message_commit=False,
-                instance_id=self.instance_id,
-            ),
-        )
-
-        # Update health check readiness
-        self.health_server.set_ready(transport_connected=True)
-
         try:
+            # Start retry handler producers
+            await self.retry_handler.start()
+
+            # Start cycle output background task
+            self._stats_logger = PeriodicStatsLogger(
+                interval_seconds=self.CYCLE_LOG_INTERVAL_SECONDS,
+                get_stats=self._get_cycle_stats,
+                stage="delta_write",
+                worker_id=self.worker_id,
+            )
+            self._stats_logger.start()
+
+            # Start batch timer
+            self._reset_batch_timer()
+
+            # Create and start consumer on enrichment_pending topic (already deduplicated)
+            # Disable per-message commits - we commit after batch writes
+            self.consumer = await create_consumer(
+                config=self.config,
+                domain=self.domain,
+                worker_name="delta_events_writer",
+                topics=[self.config.get_topic(self.domain, "enrichment_pending")],
+                message_handler=self._handle_event_message,
+                topic_key="enrichment_pending",
+                consumer_config=ConsumerConfig(
+                    enable_message_commit=False,
+                    instance_id=self.instance_id,
+                ),
+            )
+
+            # Update health check readiness
+            self.health_server.set_ready(transport_connected=True)
+
             await self.consumer.start()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            await self.stop()
+            raise
         finally:
             self._running = False
 

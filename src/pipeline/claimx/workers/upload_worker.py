@@ -205,18 +205,12 @@ class ClaimXUploadWorker:
                 extra={"onelake_base_path": onelake_path},
             )
 
-        try:
-            self.onelake_client = OneLakeClient(onelake_path, max_pool_size=self.concurrency)
-            await self.onelake_client.__aenter__()
-            logger.info(
-                "Initialized OneLake client for claimx domain",
-                extra={"domain": self.domain, "onelake_path": onelake_path},
-            )
-        except Exception as e:
-            logger.error("Failed to initialize OneLake client", extra={"error": str(e)}, exc_info=True)
-            await self.producer.stop()
-            await self.health_server.stop()
-            raise
+        self.onelake_client = OneLakeClient(onelake_path, max_pool_size=self.concurrency)
+        await self.onelake_client.__aenter__()
+        logger.info(
+            "Initialized OneLake client for claimx domain",
+            extra={"domain": self.domain, "onelake_path": onelake_path},
+        )
 
     async def start(self) -> None:
         if self._running:
@@ -236,22 +230,22 @@ class ClaimXUploadWorker:
 
         initialize_worker_telemetry(self.domain, "upload-worker")
 
-        # Initialize concurrency control
-        self._semaphore = asyncio.Semaphore(self.concurrency)
-        self._shutdown_event = asyncio.Event()
-        self._in_flight_tasks = set()
-
-        # Start producer
-        await self.producer.start()
-
-        if hasattr(self.producer, "eventhub_name"):
-            self.results_topic = self.producer.eventhub_name
-
-        # Initialize storage client (use injected client or create OneLake client)
-        await self._init_storage_client()
-
-        # Create batch consumer from transport layer
         try:
+            # Initialize concurrency control
+            self._semaphore = asyncio.Semaphore(self.concurrency)
+            self._shutdown_event = asyncio.Event()
+            self._in_flight_tasks = set()
+
+            # Start producer
+            await self.producer.start()
+
+            if hasattr(self.producer, "eventhub_name"):
+                self.results_topic = self.producer.eventhub_name
+
+            # Initialize storage client (use injected client or create OneLake client)
+            await self._init_storage_client()
+
+            # Create batch consumer from transport layer
             self._consumer = await create_batch_consumer(
                 config=self.config,
                 domain=self.domain,
@@ -265,52 +259,31 @@ class ClaimXUploadWorker:
                     instance_id=self.instance_id,
                 ),
             )
-        except Exception as e:
-            logger.error(
-                "Failed to create batch consumer",
-                extra={"error": str(e)},
-                exc_info=True,
+
+            self._consumer_group = self.config.get_consumer_group(self.domain, self.WORKER_NAME)
+            self._running = True
+
+            self._stats_logger = PeriodicStatsLogger(
+                interval_seconds=CYCLE_LOG_INTERVAL_SECONDS,
+                get_stats=self._get_cycle_stats,
+                stage="upload",
+                worker_id=self.worker_id,
             )
-            # Clean up OneLake client, producer, and health server on consumer creation failure
-            if self.onelake_client is not None:
-                try:
-                    await asyncio.to_thread(self.onelake_client.close)
-                except Exception as cleanup_error:
-                    logger.warning(
-                        "Error cleaning up OneLake client",
-                        extra={"error": str(cleanup_error)},
-                    )
-                finally:
-                    self.onelake_client = None
-            await self.producer.stop()
-            await self.health_server.stop()
-            raise
+            self._stats_logger.start()
 
-        self._consumer_group = self.config.get_consumer_group(self.domain, self.WORKER_NAME)
-        self._running = True
+            # Update health check readiness (upload worker doesn't use API)
+            self.health_server.set_ready(transport_connected=True, api_reachable=True)
 
-        self._stats_logger = PeriodicStatsLogger(
-            interval_seconds=CYCLE_LOG_INTERVAL_SECONDS,
-            get_stats=self._get_cycle_stats,
-            stage="upload",
-            worker_id=self.worker_id,
-        )
-        self._stats_logger.start()
+            await self._stale_cleaner.start()
 
-        # Update health check readiness (upload worker doesn't use API)
-        self.health_server.set_ready(transport_connected=True, api_reachable=True)
+            logger.info("ClaimX upload worker started successfully")
 
-        await self._stale_cleaner.start()
-
-        logger.info("ClaimX upload worker started successfully")
-
-        try:
             # Transport layer handles the consume loop
             await self._consumer.start()
         except asyncio.CancelledError:
-            logger.info("ClaimX upload worker cancelled")
-        except Exception as e:
-            logger.error("ClaimX upload worker error", extra={"error": str(e)}, exc_info=True)
+            raise
+        except Exception:
+            await self.stop()
             raise
         finally:
             self._running = False

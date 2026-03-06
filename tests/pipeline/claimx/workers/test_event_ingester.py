@@ -180,8 +180,7 @@ class TestEventIngesterLifecycle:
             with contextlib.suppress(Exception):
                 await worker.start()
 
-            # Verify components initialized
-            assert worker.producer is not None
+            # Verify components were created and started (stop() cleans up on failure)
             assert mock_producer.start.called
 
     @pytest.mark.asyncio

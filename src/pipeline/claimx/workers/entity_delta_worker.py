@@ -172,47 +172,49 @@ class ClaimXEntityDeltaWorker:
             finally:
                 self._stats_logger = None
 
-        # Create consumer via transport factory
-        self._consumer = await create_consumer(
-            config=self._consumer_config,
-            domain=self.domain,
-            worker_name="entity_delta_writer",
-            topics=[self._entity_rows_topic],
-            message_handler=self._handle_message,
-            topic_key="enriched",
-        )
-
-        # Initialize retry handler
-        self.retry_handler = DeltaRetryHandler(
-            config=self.producer_config,
-            table_path="claimx_entities",  # logical name for retry context
-            retry_delays=self._retry_delays,
-            retry_topic_prefix=self._retry_topic_prefix,
-            dlq_topic=self._dlq_topic,
-            domain=self.domain,
-        )
-        await self.retry_handler.start()
-
-        # Start batch timer for periodic flushing
-        self._reset_batch_timer()
-
-        # Start cycle output background task
-        self._stats_logger = PeriodicStatsLogger(
-            interval_seconds=30,
-            get_stats=self._get_cycle_stats,
-            stage="entity_delta_write",
-            worker_id=self.worker_id,
-        )
-        self._stats_logger.start()
-
-        # Update health check readiness
-        self.health_server.set_ready(transport_connected=True)
-
-        # Start the consumer
         try:
+            # Create consumer via transport factory
+            self._consumer = await create_consumer(
+                config=self._consumer_config,
+                domain=self.domain,
+                worker_name="entity_delta_writer",
+                topics=[self._entity_rows_topic],
+                message_handler=self._handle_message,
+                topic_key="enriched",
+            )
+
+            # Initialize retry handler
+            self.retry_handler = DeltaRetryHandler(
+                config=self.producer_config,
+                table_path="claimx_entities",  # logical name for retry context
+                retry_delays=self._retry_delays,
+                retry_topic_prefix=self._retry_topic_prefix,
+                dlq_topic=self._dlq_topic,
+                domain=self.domain,
+            )
+            await self.retry_handler.start()
+
+            # Start batch timer for periodic flushing
+            self._reset_batch_timer()
+
+            # Start cycle output background task
+            self._stats_logger = PeriodicStatsLogger(
+                interval_seconds=30,
+                get_stats=self._get_cycle_stats,
+                stage="entity_delta_write",
+                worker_id=self.worker_id,
+            )
+            self._stats_logger.start()
+
+            # Update health check readiness
+            self.health_server.set_ready(transport_connected=True)
+
+            # Start the consumer
             await self._consumer.start()
         except asyncio.CancelledError:
-            logger.info("ClaimXEntityDeltaWorker cancelled, shutting down...")
+            raise
+        except Exception:
+            await self.stop()
             raise
         finally:
             self._running = False
