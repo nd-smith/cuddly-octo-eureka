@@ -9,7 +9,8 @@ Tests cover:
 - Append operations for contacts/media
 """
 
-from datetime import date
+import logging
+from datetime import UTC, date, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import polars as pl
@@ -115,7 +116,7 @@ class TestClaimXEntityWriterWriteAll:
         """Test writing only projects."""
         entity_rows = EntityRowsMessage(projects=[sample_project_row])
 
-        counts = await claimx_entity_writer.write_all(entity_rows)
+        counts, failed_tables = await claimx_entity_writer.write_all(entity_rows)
 
         assert counts.get("projects") == 1
         # Verify merge was called for projects
@@ -127,7 +128,7 @@ class TestClaimXEntityWriterWriteAll:
         """Test writing only contacts."""
         entity_rows = EntityRowsMessage(contacts=[sample_contact_row])
 
-        counts = await claimx_entity_writer.write_all(entity_rows)
+        counts, failed_tables = await claimx_entity_writer.write_all(entity_rows)
 
         assert counts.get("contacts") == 1
         # Verify append was called for contacts (not merge)
@@ -140,7 +141,7 @@ class TestClaimXEntityWriterWriteAll:
         """Test writing only media."""
         entity_rows = EntityRowsMessage(media=[sample_media_row])
 
-        counts = await claimx_entity_writer.write_all(entity_rows)
+        counts, failed_tables = await claimx_entity_writer.write_all(entity_rows)
 
         assert counts.get("media") == 1
         # Verify append was called for media (not merge)
@@ -153,7 +154,7 @@ class TestClaimXEntityWriterWriteAll:
         """Test writing only tasks."""
         entity_rows = EntityRowsMessage(tasks=[sample_task_row])
 
-        counts = await claimx_entity_writer.write_all(entity_rows)
+        counts, failed_tables = await claimx_entity_writer.write_all(entity_rows)
 
         assert counts.get("tasks") == 1
         # Verify merge was called for tasks
@@ -175,7 +176,7 @@ class TestClaimXEntityWriterWriteAll:
             media=[sample_media_row],
         )
 
-        counts = await claimx_entity_writer.write_all(entity_rows)
+        counts, failed_tables = await claimx_entity_writer.write_all(entity_rows)
 
         assert counts.get("projects") == 1
         assert counts.get("contacts") == 1
@@ -186,7 +187,7 @@ class TestClaimXEntityWriterWriteAll:
         """Test writing with no data returns empty counts."""
         entity_rows = EntityRowsMessage()
 
-        counts = await claimx_entity_writer.write_all(entity_rows)
+        counts, failed_tables = await claimx_entity_writer.write_all(entity_rows)
 
         assert counts == {}
 
@@ -202,7 +203,7 @@ class TestClaimXEntityWriterWriteAll:
         ]
         entity_rows = EntityRowsMessage(projects=projects)
 
-        counts = await claimx_entity_writer.write_all(entity_rows)
+        counts, failed_tables = await claimx_entity_writer.write_all(entity_rows)
 
         assert counts.get("projects") == 3
 
@@ -523,10 +524,11 @@ async def test_claimx_entity_writer_integration():
             ],
         )
 
-        counts = await writer.write_all(entity_rows)
+        counts, failed_tables = await writer.write_all(entity_rows)
 
         assert counts.get("projects") == 1
         assert counts.get("contacts") == 1
+        assert failed_tables == []
 
         # Verify merge was called for projects
         projects_mock = mock_writers["abfss://test/projects"]
@@ -535,3 +537,147 @@ async def test_claimx_entity_writer_integration():
         # Verify append was called for contacts
         contacts_mock = mock_writers["abfss://test/contacts"]
         contacts_mock._async_append.assert_called_once()
+
+
+class TestClaimXEntityWriterFailedTables:
+    """Test write_all failure reporting (H3)."""
+
+    @pytest.mark.asyncio
+    async def test_write_all_reports_failed_tables(self):
+        """write_all returns failed table names when writes fail."""
+        mock_writers = {}
+
+        def create_mock_writer(table_path, **kwargs):
+            mock = MagicMock()
+            mock.table_path = table_path
+            mock.partition_column = kwargs.get("partition_column")
+            # Projects will fail, contacts will succeed
+            if "projects" in table_path:
+                mock._async_merge = AsyncMock(return_value=False)
+            else:
+                mock._async_append = AsyncMock(return_value=True)
+                mock._async_merge = AsyncMock(return_value=True)
+            mock_writers[table_path] = mock
+            return mock
+
+        with patch(
+            "pipeline.claimx.writers.delta_entities.BaseDeltaWriter",
+            side_effect=create_mock_writer,
+        ):
+            from pipeline.claimx.writers.delta_entities import ClaimXEntityWriter
+
+            writer = ClaimXEntityWriter(
+                projects_table_path="abfss://test/projects",
+                contacts_table_path="abfss://test/contacts",
+                media_table_path="abfss://test/media",
+                tasks_table_path="abfss://test/tasks",
+                task_templates_table_path="abfss://test/task_templates",
+                external_links_table_path="abfss://test/external_links",
+                video_collab_table_path="abfss://test/video_collab",
+            )
+
+            entity_rows = EntityRowsMessage(
+                projects=[{"project_id": "123", "status": "active"}],
+                contacts=[
+                    {
+                        "project_id": "123",
+                        "contact_email": "a@b.com",
+                        "contact_type": "primary",
+                    }
+                ],
+            )
+
+            counts, failed_tables = await writer.write_all(entity_rows)
+
+            assert "projects" in failed_tables
+            assert "projects" not in counts
+            assert counts.get("contacts") == 1
+
+
+class TestClaimXEntityWriterColumnWarning:
+    """Test unknown column warning (H4)."""
+
+    def test_create_dataframe_warns_on_unknown_columns(self, caplog):
+        """_create_dataframe_with_schema warns when columns are not in schema."""
+        with patch("pipeline.claimx.writers.delta_entities.BaseDeltaWriter"):
+            from pipeline.claimx.writers.delta_entities import ClaimXEntityWriter
+
+            writer = ClaimXEntityWriter(
+                projects_table_path="test",
+                contacts_table_path="test",
+                media_table_path="test",
+                tasks_table_path="test",
+                task_templates_table_path="test",
+                external_links_table_path="test",
+                video_collab_table_path="test",
+            )
+
+            rows = [
+                {
+                    "project_id": "123",
+                    "unknown_field": "should be dropped",
+                    "another_unknown": 42,
+                }
+            ]
+
+            with caplog.at_level(logging.WARNING):
+                df = writer._create_dataframe_with_schema("projects", rows)
+
+            assert "Dropping columns not in schema" in caplog.text
+            assert "project_id" in df.columns
+            assert "unknown_field" not in df.columns
+
+
+class TestClaimXEntityWriterCoercion:
+    """Test _coerce_value for numeric and boolean types (M5)."""
+
+    def test_coerce_value_string_to_int(self):
+        from pipeline.claimx.writers.delta_entities import ClaimXEntityWriter
+
+        assert ClaimXEntityWriter._coerce_value("42", pl.Int32) == 42
+        assert ClaimXEntityWriter._coerce_value("12345", pl.Int64) == 12345
+
+    def test_coerce_value_string_to_float(self):
+        from pipeline.claimx.writers.delta_entities import ClaimXEntityWriter
+
+        assert ClaimXEntityWriter._coerce_value("3.14", pl.Float64) == 3.14
+
+    def test_coerce_value_string_to_boolean(self):
+        from pipeline.claimx.writers.delta_entities import ClaimXEntityWriter
+
+        assert ClaimXEntityWriter._coerce_value("true", pl.Boolean) is True
+        assert ClaimXEntityWriter._coerce_value("True", pl.Boolean) is True
+        assert ClaimXEntityWriter._coerce_value("1", pl.Boolean) is True
+        assert ClaimXEntityWriter._coerce_value("false", pl.Boolean) is False
+        assert ClaimXEntityWriter._coerce_value("0", pl.Boolean) is False
+
+    def test_coerce_value_non_string_passthrough(self):
+        from pipeline.claimx.writers.delta_entities import ClaimXEntityWriter
+
+        assert ClaimXEntityWriter._coerce_value(42, pl.Int32) == 42
+        assert ClaimXEntityWriter._coerce_value(None, pl.Int32) is None
+
+
+class TestClaimXEntityWriterTimestamp:
+    """Test _ensure_timestamp_columns preserves UTC timezone (M6)."""
+
+    def test_ensure_timestamp_preserves_utc(self):
+        """pl.lit(now) with explicit cast preserves UTC timezone."""
+        with patch("pipeline.claimx.writers.delta_entities.BaseDeltaWriter"):
+            from pipeline.claimx.writers.delta_entities import ClaimXEntityWriter
+
+            writer = ClaimXEntityWriter(
+                projects_table_path="test",
+                contacts_table_path="test",
+                media_table_path="test",
+                tasks_table_path="test",
+                task_templates_table_path="test",
+                external_links_table_path="test",
+                video_collab_table_path="test",
+            )
+
+            df = pl.DataFrame({"project_id": ["123"]})
+            result = writer._ensure_timestamp_columns(df)
+
+            assert result.schema["created_at"] == pl.Datetime("us", "UTC")
+            assert result.schema["updated_at"] == pl.Datetime("us", "UTC")

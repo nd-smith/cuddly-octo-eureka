@@ -12,6 +12,7 @@ from config.config import MessageConfig
 from core.types import ErrorCategory
 from pipeline.claimx.schemas.results import FailedEnrichmentMessage
 from pipeline.claimx.schemas.tasks import ClaimXEnrichmentTask
+from pipeline.common.metrics import record_dlq_message
 from pipeline.common.retry.retry_utils import (
     create_dlq_headers,
     create_retry_headers,
@@ -50,6 +51,15 @@ class EnrichmentRetryHandler:
         # Retry configuration
         self._retry_delays = config.get_retry_delays(domain)
         self._max_retries = config.get_max_retries(domain)
+
+        if self._max_retries > len(self._retry_delays):
+            logger.warning(
+                "max_retries exceeds retry_delays length, delays will be clamped to last value",
+                extra={
+                    "max_retries": self._max_retries,
+                    "retry_delays_length": len(self._retry_delays),
+                },
+            )
 
         # Dedicated producers (created in start())
         self._retry_producer = None
@@ -128,6 +138,12 @@ class EnrichmentRetryHandler:
             RuntimeError: If producer is not started
             Exception: If send to retry topic or DLQ fails
         """
+        if self._retry_producer is None or self._dlq_producer is None:
+            raise RuntimeError(
+                "EnrichmentRetryHandler.handle_failure() called before start(). "
+                "Call start() to initialize producers."
+            )
+
         retry_count = task.retry_count
 
         logger.info(
@@ -176,9 +192,8 @@ class EnrichmentRetryHandler:
         """
         retry_count = task.retry_count
 
-        # NEW: Single unified retry topic per domain
-        retry_topic = self.config.get_retry_topic(self.domain)
-        delay_seconds = self._retry_delays[retry_count]
+        delay_index = min(retry_count, len(self._retry_delays) - 1)
+        delay_seconds = self._retry_delays[delay_index]
 
         updated_task = task.model_copy(deep=True)
         updated_task.retry_count += 1
@@ -192,14 +207,12 @@ class EnrichmentRetryHandler:
         retry_at = datetime.now(UTC) + timedelta(seconds=delay_seconds)
         updated_task.metadata["retry_at"] = retry_at.isoformat()
 
-        # NEW: Get target topic for routing
         target_topic = self.pending_topic
 
         logger.info(
             "Sending task to retry topic",
             extra={
                 "trace_id": task.trace_id,
-                "retry_topic": retry_topic,
                 "retry_count": updated_task.retry_count,
                 "delay_seconds": delay_seconds,
                 "retry_at": retry_at.isoformat(),
@@ -226,7 +239,6 @@ class EnrichmentRetryHandler:
             "Task sent to retry topic successfully",
             extra={
                 "trace_id": task.trace_id,
-                "retry_topic": retry_topic,
                 "target_topic": target_topic,
             },
         )
@@ -275,6 +287,8 @@ class EnrichmentRetryHandler:
                 "dlq_reason": reason,
             },
         )
+
+        record_dlq_message(domain=self.domain, reason=reason)
 
         await self._dlq_producer.send(
             value=dlq_message,

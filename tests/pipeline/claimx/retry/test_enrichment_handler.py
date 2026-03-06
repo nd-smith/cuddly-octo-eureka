@@ -13,7 +13,7 @@ Test Coverage:
 """
 
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -550,6 +550,97 @@ class TestEnrichmentRetryHandlerDLQMessage:
 
         assert dlq_message.error_category == "permanent"
         assert "Permanent error" in dlq_message.final_error
+
+
+class TestEnrichmentRetryHandlerProducerGuard:
+    """Tests for producer guard (H2) and delay clamping (H1)."""
+
+    @pytest.fixture
+    def mock_config(self):
+        config = Mock()
+        config.get_retry_delays.return_value = [300, 600, 1200, 2400]
+        config.get_max_retries.return_value = 4
+        config.get_retry_topic.return_value = "claimx.enrichment.retry"
+        config.get_topic.return_value = "enrichment_pending"
+        return config
+
+    @pytest.fixture
+    def sample_task(self):
+        return ClaimXEnrichmentTask(
+            trace_id="evt-123",
+            event_type="PROJECT_CREATED",
+            project_id="proj-456",
+            retry_count=0,
+            created_at=datetime.now(UTC),
+            ingested_at=datetime.now(UTC),
+            metadata={},
+        )
+
+    @pytest.mark.asyncio
+    async def test_handle_failure_before_start_raises_runtime_error(self, mock_config, sample_task):
+        """handle_failure raises RuntimeError when producers are not started."""
+        handler = EnrichmentRetryHandler(config=mock_config)
+
+        with pytest.raises(RuntimeError, match="called before start"):
+            await handler.handle_failure(
+                task=sample_task,
+                error=ConnectionError("Error"),
+                error_category=ErrorCategory.TRANSIENT,
+            )
+
+    @pytest.mark.asyncio
+    async def test_retry_delay_clamped_when_exceeds_delays_length(self, mock_config):
+        """Retry delay is clamped to last value when retry_count exceeds delays length."""
+        config = Mock()
+        config.get_retry_delays.return_value = [100, 200]
+        config.get_max_retries.return_value = 5
+        config.get_retry_topic.return_value = "claimx.enrichment.retry"
+        config.get_topic.return_value = "enrichment_pending"
+
+        handler = EnrichmentRetryHandler(config=config)
+        handler._retry_producer = AsyncMock()
+        handler._dlq_producer = AsyncMock()
+
+        task = ClaimXEnrichmentTask(
+            trace_id="evt-123",
+            event_type="PROJECT_CREATED",
+            project_id="proj-456",
+            retry_count=3,  # exceeds delays length (2)
+            created_at=datetime.now(UTC),
+            ingested_at=datetime.now(UTC),
+            metadata={},
+        )
+
+        await handler.handle_failure(
+            task=task,
+            error=ConnectionError("Error"),
+            error_category=ErrorCategory.TRANSIENT,
+        )
+
+        # Should not raise IndexError — delay clamped to last value (200)
+        retry_call = handler._retry_producer.send.call_args
+        retry_task = retry_call.kwargs["value"]
+        assert retry_task.retry_count == 4
+
+    @pytest.mark.asyncio
+    async def test_dlq_records_metric(self, mock_config, sample_task):
+        """DLQ routing records a metric via record_dlq_message (M2)."""
+        handler = EnrichmentRetryHandler(config=mock_config)
+        handler._retry_producer = AsyncMock()
+        handler._dlq_producer = AsyncMock()
+
+        sample_task.retry_count = 4
+
+        with patch(
+            "pipeline.claimx.retry.enrichment_handler.record_dlq_message"
+        ) as mock_record:
+            await handler.handle_failure(
+                task=sample_task,
+                error=ValueError("Permanent error"),
+                error_category=ErrorCategory.PERMANENT,
+            )
+
+            mock_record.assert_called_once_with(domain="claimx", reason="permanent")
 
 
 class TestEnrichmentRetryHandlerTaskImmutability:

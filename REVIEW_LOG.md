@@ -74,15 +74,42 @@ Tracking review progress layer-by-layer through the ClaimX pipeline.
 
 ---
 
-## Up Next
-
 ### 4. Retry (`src/pipeline/claimx/retry/`)
-- `enrichment_handler.py` — Enrichment retry/DLQ routing
-- `download_handler.py` — Download retry/DLQ routing (partially reviewed in schemas pass)
+- **Reviewed:** 2026-03-05
+- **Files:** `enrichment_handler.py`, `download_handler.py`
+- **Issues found:** 2 high, 3 medium, 2 low — all fixed
+- **Tests added:** 6 new tests (3 per handler)
+- **Key fixes:**
+  - **H1:** `_retry_delays[retry_count]` IndexError when `max_retries > len(delays)` — clamped to last delay + `__init__` warning
+  - **H2:** `handle_failure()` called `.send()` on `None` producers before `start()` — added `RuntimeError` guard
+  - **M1:** `download_handler` used `str(error)[:500]` instead of `truncate_error_message()` — fixed for consistency
+  - **M2:** `enrichment_handler._send_to_dlq` never called `record_dlq_message()` — added import + call
+  - **M3:** `download_handler` DLQ headers missing `trace_id` kwarg — added `trace_id=task.trace_id`
+  - **L1:** `download_handler._send_to_dlq` malformed docstring — added `Args:`/`Raises:` sections
+  - **L2:** Unused `retry_topic` variable in both handlers — removed from code and log extras
+
+---
 
 ### 5. Writers (`src/pipeline/claimx/writers/`)
-- `delta_entities.py` — Entity rows → Delta table writes
-- `delta_events.py` — Event data → Delta table writes
+- **Reviewed:** 2026-03-05
+- **Files:** `delta_entities.py`, `delta_events.py`, `__init__.py`
+- **Issues found:** 2 high, 2 medium, 2 low — all fixed
+- **Tests added:** 7 new tests
+- **Key fixes:**
+  - **H3:** `write_all` returned only counts, caller committed offsets on partial failure — now returns `(counts, failed_tables)` tuple; `entity_delta_worker` skips commit when tables fail
+  - **H4:** Columns not in `TABLE_SCHEMAS` silently dropped — now logs warning with dropped column names
+  - **M5:** `_coerce_value` only handled Datetime/Date strings — extended for `Int32`/`Int64`/`Float64`/`Boolean`
+  - **M6:** `pl.lit(now)` could lose UTC timezone — added explicit `.cast(pl.Datetime("us", "UTC"))`
+  - **L6:** `TABLE_SCHEMAS` not exported from `writers/__init__.py` — added to exports
+  - **L7:** `sample_event` in log extras may contain PII — removed from `delta_events.py`
+- **Deferred:**
+  - **L3:** `"unauthorized"` in URL expiration indicators — needs product decision
+  - **L5:** Contacts in `_APPEND_ONLY_TABLES` despite having merge keys — needs product confirmation
+  - **L4:** `TABLE_SCHEMAS` type annotation style (class refs vs instances) — cosmetic
+
+---
+
+## Up Next
 
 ### 6. API Client (`src/pipeline/claimx/`)
 - `api_client.py` — ClaimX REST API client (auth, endpoints, error handling)

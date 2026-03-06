@@ -300,11 +300,16 @@ class ClaimXEntityWriter:
 
     # Entity type attribute names on EntityRowsMessage (in write order)
     _ENTITY_TYPES = (
-        "projects", "contacts", "media", "tasks",
-        "task_templates", "external_links", "video_collab",
+        "projects",
+        "contacts",
+        "media",
+        "tasks",
+        "task_templates",
+        "external_links",
+        "video_collab",
     )
 
-    async def write_all(self, entity_rows: EntityRowsMessage) -> dict[str, int]:
+    async def write_all(self, entity_rows: EntityRowsMessage) -> tuple[dict[str, int], list[str]]:
         """
         Write all entity rows to their respective Delta tables.
 
@@ -314,9 +319,10 @@ class ClaimXEntityWriter:
             entity_rows: EntityRowsMessage with data for each table
 
         Returns:
-            Dict mapping table name to rows written
+            Tuple of (counts dict mapping table name to rows written, list of failed table names)
         """
         counts: dict[str, int] = {}
+        failed_tables: list[str] = []
 
         for entity_type in self._ENTITY_TYPES:
             rows = getattr(entity_rows, entity_type, None)
@@ -324,6 +330,8 @@ class ClaimXEntityWriter:
                 result = await self._write_table(entity_type, rows)
                 if result is not None:
                     counts[entity_type] = result
+                else:
+                    failed_tables.append(entity_type)
 
         self.logger.info(
             f"Write cycle complete: {sum(counts.values())} total rows across {len(counts)} tables",
@@ -331,10 +339,11 @@ class ClaimXEntityWriter:
                 "tables_written": counts,
                 "total_rows": sum(counts.values()),
                 "table_count": len(counts),
+                "failed_tables": failed_tables,
             },
         )
 
-        return counts
+        return counts, failed_tables
 
     # Tables that use append-only writes (no merge)
     _APPEND_ONLY_TABLES = frozenset({"contacts", "media"})
@@ -342,9 +351,10 @@ class ClaimXEntityWriter:
     def _ensure_timestamp_columns(self, df: pl.DataFrame) -> pl.DataFrame:
         """Ensure created_at and updated_at columns have non-null values."""
         now = datetime.now(UTC)
+        ts_type = pl.Datetime("us", "UTC")
         for col in ("created_at", "updated_at"):
             if col not in df.columns:
-                df = df.with_columns(pl.lit(now).alias(col))
+                df = df.with_columns(pl.lit(now).cast(ts_type).alias(col))
             else:
                 df = df.with_columns(pl.col(col).fill_null(now))
         return df
@@ -370,7 +380,9 @@ class ClaimXEntityWriter:
         writer = self._writers.get(table_name)
         merge_keys = MERGE_KEYS.get(table_name)
         if not writer or not merge_keys:
-            self.logger.warning(f"No writer/merge keys for table: {table_name}", extra={"table_name": table_name})
+            self.logger.warning(
+                f"No writer/merge keys for table: {table_name}", extra={"table_name": table_name}
+            )
             return None
 
         try:
@@ -387,17 +399,29 @@ class ClaimXEntityWriter:
                     update_condition="source.modified_date <> target.modified_date OR target.modified_date IS NULL",
                 )
             else:
-                success = await writer._async_merge(df, merge_keys=merge_keys, preserve_columns=["created_at"])
+                success = await writer._async_merge(
+                    df, merge_keys=merge_keys, preserve_columns=["created_at"]
+                )
 
             if success:
-                self.logger.info(f"Wrote {len(df)} rows to {table_name}", extra={"table_name": table_name, "rows_written": len(df)})
+                self.logger.info(
+                    f"Wrote {len(df)} rows to {table_name}",
+                    extra={"table_name": table_name, "rows_written": len(df)},
+                )
                 return len(df)
 
-            self.logger.error(f"{table_name} table write failed", extra={"table_name": table_name, "row_count": len(rows)})
+            self.logger.error(
+                f"{table_name} table write failed",
+                extra={"table_name": table_name, "row_count": len(rows)},
+            )
             return None
 
         except Exception as e:
-            self.logger.error(f"Error writing to {table_name} table", extra={"table_name": table_name, "row_count": len(rows), "error": str(e)}, exc_info=True)
+            self.logger.error(
+                f"Error writing to {table_name} table",
+                extra={"table_name": table_name, "row_count": len(rows), "error": str(e)},
+                exc_info=True,
+            )
             return None
 
     @staticmethod
@@ -411,6 +435,12 @@ class ClaimXEntityWriter:
             if "T" in val:
                 return datetime.fromisoformat(val.replace("Z", "+00:00")).date()
             return date.fromisoformat(val)
+        if col_type in (pl.Int32, pl.Int64):
+            return int(val)
+        if col_type == pl.Float64:
+            return float(val)
+        if col_type == pl.Boolean:
+            return val.lower() in ("true", "1", "yes")
         return val
 
     def _create_dataframe_with_schema(
@@ -432,6 +462,16 @@ class ClaimXEntityWriter:
         all_columns: set[str] = set()
         for row in rows:
             all_columns.update(row.keys())
+
+        dropped_columns = all_columns - table_schema.keys()
+        if dropped_columns:
+            self.logger.warning(
+                "Dropping columns not in schema",
+                extra={
+                    "table_name": table_name,
+                    "dropped_columns": sorted(dropped_columns),
+                },
+            )
 
         schema = {col: table_schema[col] for col in all_columns if col in table_schema}
 

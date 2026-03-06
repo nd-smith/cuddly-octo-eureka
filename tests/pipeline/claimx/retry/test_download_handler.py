@@ -685,6 +685,110 @@ class TestDownloadRetryHandlerMessageKeys:
         assert headers["original_key"] == "evt-abc-123"
 
 
+class TestDownloadRetryHandlerProducerGuard:
+    """Tests for producer guard (H2), delay clamping (H1), and DLQ trace_id (M3)."""
+
+    @pytest.fixture
+    def mock_config(self):
+        config = Mock()
+        config.get_retry_delays.return_value = [300, 600, 1200, 2400]
+        config.get_max_retries.return_value = 4
+        config.get_retry_topic.return_value = "claimx.enrichment.retry"
+        config.get_topic.return_value = "enrichment_pending"
+        return config
+
+    @pytest.fixture
+    def mock_api_client(self):
+        return AsyncMock(spec=ClaimXApiClient)
+
+    @pytest.fixture
+    def sample_task(self):
+        return ClaimXDownloadTask(
+            media_id="12345",
+            project_id="67890",
+            download_url="https://example.com/file.pdf",
+            blob_path="claimx/projects/67890/media/12345.pdf",
+            file_type="pdf",
+            file_name="document.pdf",
+            trace_id="evt-123",
+            retry_count=0,
+            metadata={},
+        )
+
+    @pytest.mark.asyncio
+    async def test_handle_failure_before_start_raises_runtime_error(
+        self, mock_config, mock_api_client, sample_task
+    ):
+        """handle_failure raises RuntimeError when producers are not started."""
+        handler = DownloadRetryHandler(config=mock_config, api_client=mock_api_client)
+
+        with pytest.raises(RuntimeError, match="called before start"):
+            await handler.handle_failure(
+                task=sample_task,
+                error=ConnectionError("Error"),
+                error_category=ErrorCategory.TRANSIENT,
+            )
+
+    @pytest.mark.asyncio
+    async def test_retry_delay_clamped_when_exceeds_delays_length(
+        self, mock_api_client
+    ):
+        """Retry delay is clamped to last value when retry_count exceeds delays length."""
+        config = Mock()
+        config.get_retry_delays.return_value = [100, 200]
+        config.get_max_retries.return_value = 5
+        config.get_retry_topic.return_value = "claimx.enrichment.retry"
+        config.get_topic.return_value = "enrichment_pending"
+
+        handler = DownloadRetryHandler(config=config, api_client=mock_api_client)
+        handler._retry_producer = AsyncMock()
+        handler._dlq_producer = AsyncMock()
+
+        task = ClaimXDownloadTask(
+            media_id="12345",
+            project_id="67890",
+            download_url="https://example.com/file.pdf",
+            blob_path="claimx/projects/67890/media/12345.pdf",
+            file_type="pdf",
+            file_name="document.pdf",
+            trace_id="evt-123",
+            retry_count=3,  # exceeds delays length (2)
+            metadata={},
+        )
+
+        await handler.handle_failure(
+            task=task,
+            error=ConnectionError("Error"),
+            error_category=ErrorCategory.TRANSIENT,
+        )
+
+        # Should not raise IndexError — delay clamped to last value (200)
+        retry_call = handler._retry_producer.send.call_args
+        retry_task = retry_call.kwargs["value"]
+        assert retry_task.retry_count == 4
+
+    @pytest.mark.asyncio
+    async def test_dlq_headers_include_trace_id(
+        self, mock_config, mock_api_client, sample_task
+    ):
+        """DLQ headers include trace_id (M3)."""
+        handler = DownloadRetryHandler(config=mock_config, api_client=mock_api_client)
+        handler._retry_producer = AsyncMock()
+        handler._dlq_producer = AsyncMock()
+
+        sample_task.retry_count = 4
+
+        await handler.handle_failure(
+            task=sample_task,
+            error=ConnectionError("Error"),
+            error_category=ErrorCategory.TRANSIENT,
+        )
+
+        dlq_call = handler._dlq_producer.send.call_args
+        headers = dlq_call.kwargs["headers"]
+        assert headers.get("trace_id") == "evt-123"
+
+
 class TestDownloadRetryHandlerTaskImmutability:
     """Tests for task deep copy behavior."""
 

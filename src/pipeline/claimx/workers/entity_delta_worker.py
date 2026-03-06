@@ -5,8 +5,9 @@ Writes entity rows to Delta Lake tables with batch processing.
 
 import asyncio
 import contextlib
-import orjson
 import logging
+
+import orjson
 
 from config.config import MessageConfig
 from core.errors.exceptions import PermanentError
@@ -73,7 +74,6 @@ class ClaimXEntityDeltaWorker:
         # Consumer created in start() (create_consumer is async)
         self._consumer = None
 
-        # Store domain for use in worker-specific logic
         self.domain = domain
         self.instance_id = instance_id
 
@@ -219,7 +219,9 @@ class ClaimXEntityDeltaWorker:
         finally:
             self._running = False
 
-    async def _close_resource(self, name: str, method: str = "stop", *, clear: bool = False) -> None:
+    async def _close_resource(
+        self, name: str, method: str = "stop", *, clear: bool = False
+    ) -> None:
         """Close a resource by attribute name, logging errors. Optionally set to None."""
         resource = getattr(self, name, None)
         if resource is None:
@@ -381,7 +383,7 @@ class ClaimXEntityDeltaWorker:
                 },
             )
 
-            counts = await self.entity_writer.write_all(merged_rows)
+            counts, failed_tables = await self.entity_writer.write_all(merged_rows)
 
             total_rows = sum(counts.values())
             self._batches_written += 1
@@ -393,25 +395,41 @@ class ClaimXEntityDeltaWorker:
                     "tables_written": list(counts.keys()),
                     "total_rows": total_rows,
                     "batches_written": self._batches_written,
+                    "failed_tables": failed_tables,
                 },
             )
 
-            # Commit offsets if successful
-            await self.commit()
+            if failed_tables:
+                logger.error(
+                    "Some entity tables failed to write, skipping offset commit",
+                    extra={"failed_tables": failed_tables},
+                )
+                self._records_failed += sum(
+                    len(getattr(merged_rows, t, []) or []) for t in failed_tables
+                )
+            else:
+                await self.commit()
 
             # Metrics
             for table_name, row_count in counts.items():
                 record_delta_write(
                     table=f"claimx_{table_name}", event_count=row_count, success=True
                 )
+            for table_name in failed_tables:
+                record_delta_write(table=f"claimx_{table_name}", event_count=0, success=False)
 
         except Exception as e:
             self._records_failed += merged_rows.row_count()
             await self._handle_flush_error(e, merged_rows, batch_size)
 
     _ENTITY_TYPES = (
-        "projects", "contacts", "media", "tasks",
-        "task_templates", "external_links", "video_collab",
+        "projects",
+        "contacts",
+        "media",
+        "tasks",
+        "task_templates",
+        "external_links",
+        "video_collab",
     )
 
     def _extract_retry_events(self, merged_rows: EntityRowsMessage) -> list[dict]:
@@ -419,13 +437,15 @@ class ClaimXEntityDeltaWorker:
         events = []
         for entity_type in self._ENTITY_TYPES:
             for entity in getattr(merged_rows, entity_type, []):
-                events.append({
-                    "entity_type": entity_type,
-                    "trace_id": merged_rows.trace_id,
-                    "event_type": merged_rows.event_type,
-                    "project_id": merged_rows.project_id,
-                    **entity,
-                })
+                events.append(
+                    {
+                        "entity_type": entity_type,
+                        "trace_id": merged_rows.trace_id,
+                        "event_type": merged_rows.event_type,
+                        "project_id": merged_rows.project_id,
+                        **entity,
+                    }
+                )
         return events
 
     async def _handle_flush_error(

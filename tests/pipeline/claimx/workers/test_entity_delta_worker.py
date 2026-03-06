@@ -377,7 +377,7 @@ class TestEntityDeltaWorkerDeltaWrites:
 
         # Mock entity writer
         worker.entity_writer = AsyncMock()
-        worker.entity_writer.write_all = AsyncMock(return_value={"projects": 1, "contacts": 1})
+        worker.entity_writer.write_all = AsyncMock(return_value=({"projects": 1, "contacts": 1}, []))
         worker._consumer = AsyncMock()
         worker._consumer.commit = AsyncMock()
 
@@ -464,7 +464,7 @@ class TestEntityDeltaWorkerDeltaWrites:
         )
 
         worker.entity_writer = AsyncMock()
-        worker.entity_writer.write_all = AsyncMock(return_value={"projects": 1})
+        worker.entity_writer.write_all = AsyncMock(return_value=({"projects": 1}, []))
         worker._consumer = AsyncMock()
         worker._consumer.commit = AsyncMock()
 

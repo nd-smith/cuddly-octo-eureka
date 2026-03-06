@@ -62,6 +62,15 @@ class DownloadRetryHandler:
         self._retry_delays = config.get_retry_delays(domain)
         self._max_retries = config.get_max_retries(domain)
 
+        if self._max_retries > len(self._retry_delays):
+            logger.warning(
+                "max_retries exceeds retry_delays length, delays will be clamped to last value",
+                extra={
+                    "max_retries": self._max_retries,
+                    "retry_delays_length": len(self._retry_delays),
+                },
+            )
+
         # Dedicated producers (created in start())
         self._retry_producer = None
         self._dlq_producer = None
@@ -133,8 +142,21 @@ class DownloadRetryHandler:
         For transient/unknown errors, detects expired URLs and refreshes
         them from ClaimX API before routing to retry topic.
 
+        Args:
+            task: Download task that failed
+            error: Exception that caused failure
+            error_category: Classification of the error
+
+        Raises:
+            RuntimeError: If producer is not started
             Exception: If send to retry topic or DLQ fails
         """
+        if self._retry_producer is None or self._dlq_producer is None:
+            raise RuntimeError(
+                "DownloadRetryHandler.handle_failure() called before start(). "
+                "Call start() to initialize producers."
+            )
+
         retry_count = task.retry_count
 
         logger.info(
@@ -156,7 +178,11 @@ class DownloadRetryHandler:
         if send_to_dlq_flag:
             action = "dlq_permanent" if dlq_reason == "permanent" else "dlq_exhausted"
             log_retry_decision(
-                action, task.media_id, retry_count, error_category, error,
+                action,
+                task.media_id,
+                retry_count,
+                error_category,
+                error,
                 extra_context={"project_id": task.project_id},
             )
             await self._send_to_dlq(task, error, error_category, url_refresh_attempted=False)
@@ -298,13 +324,18 @@ class DownloadRetryHandler:
         Increments retry count and adds error context to metadata.
         Calculates retry_at timestamp based on configured delay.
 
+        Args:
+            task: Download task to retry
+            error: Exception that caused failure
+            error_category: Classification of the error
+
+        Raises:
             Exception: If send to retry topic fails
         """
         retry_count = task.retry_count
 
-        # NEW: Single unified retry topic per domain
-        retry_topic = self.config.get_retry_topic(self.domain)
-        delay_seconds = self._retry_delays[retry_count]
+        delay_index = min(retry_count, len(self._retry_delays) - 1)
+        delay_seconds = self._retry_delays[delay_index]
 
         updated_task = task.model_copy(deep=True)
         updated_task.retry_count += 1
@@ -316,14 +347,12 @@ class DownloadRetryHandler:
         retry_at = datetime.now(UTC) + timedelta(seconds=delay_seconds)
         updated_task.metadata["retry_at"] = retry_at.isoformat()
 
-        # NEW: Get target topic for routing
         target_topic = self.pending_topic
 
         logger.info(
             "Sending task to retry topic",
             extra={
                 "media_id": task.media_id,
-                "retry_topic": retry_topic,
                 "retry_count": updated_task.retry_count,
                 "delay_seconds": delay_seconds,
                 "retry_at": retry_at.isoformat(),
@@ -352,7 +381,6 @@ class DownloadRetryHandler:
             extra={
                 "trace_id": task.trace_id,
                 "media_id": task.media_id,
-                "retry_topic": retry_topic,
                 "target_topic": target_topic,
             },
         )
@@ -370,6 +398,13 @@ class DownloadRetryHandler:
         Creates FailedDownloadMessage with complete context for manual
         review and potential replay. Preserves original task for replay.
 
+        Args:
+            task: Download task that failed permanently
+            error: Final exception that caused failure
+            error_category: Classification of the error
+            url_refresh_attempted: Whether URL refresh was tried before DLQ
+
+        Raises:
             Exception: If send to DLQ fails
         """
         dlq_message = FailedDownloadMessage(
@@ -378,7 +413,7 @@ class DownloadRetryHandler:
             project_id=task.project_id,
             download_url=task.download_url,
             original_task=task,
-            final_error=str(error)[:500],
+            final_error=truncate_error_message(error),
             error_category=error_category.value,
             retry_count=task.retry_count,
             failed_at=datetime.now(UTC),
@@ -402,7 +437,7 @@ class DownloadRetryHandler:
         record_dlq_message(domain="claimx", reason=reason)
 
         # Use trace_id as key for consistent partitioning across all ClaimX topics
-        dlq_headers = create_dlq_headers(task.retry_count, error_category)
+        dlq_headers = create_dlq_headers(task.retry_count, error_category, trace_id=task.trace_id)
         dlq_headers["url_refresh_attempted"] = str(url_refresh_attempted)
         await self._dlq_producer.send(
             value=dlq_message,

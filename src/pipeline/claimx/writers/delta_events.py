@@ -67,18 +67,20 @@ class ClaimXEventsDeltaWriter(BaseDeltaWriter):
         processed = []
         for event in events:
             ingested_at = self._normalize_ingested_at(event.get("ingested_at"), now)
-            processed.append({
-                "trace_id": event.get("trace_id"),
-                "event_type": event.get("event_type"),
-                "project_id": event.get("project_id"),
-                "media_id": event.get("media_id"),
-                "task_assignment_id": event.get("task_assignment_id"),
-                "video_collaboration_id": event.get("video_collaboration_id"),
-                "master_file_name": event.get("master_file_name"),
-                "created_at": now,
-                "ingested_at": ingested_at,
-                "event_date": ingested_at.date(),
-            })
+            processed.append(
+                {
+                    "trace_id": event.get("trace_id"),
+                    "event_type": event.get("event_type"),
+                    "project_id": event.get("project_id"),
+                    "media_id": event.get("media_id"),
+                    "task_assignment_id": event.get("task_assignment_id"),
+                    "video_collaboration_id": event.get("video_collaboration_id"),
+                    "master_file_name": event.get("master_file_name"),
+                    "created_at": now,
+                    "ingested_at": ingested_at,
+                    "event_date": ingested_at.date(),
+                }
+            )
         return processed
 
     async def write_events(self, events: list[dict[str, Any]]) -> bool:
@@ -106,7 +108,8 @@ class ClaimXEventsDeltaWriter(BaseDeltaWriter):
             processed_events = self._preprocess_events(events)
 
             valid_events = [
-                e for e in processed_events
+                e
+                for e in processed_events
                 if e.get("trace_id") is not None and e.get("event_type") is not None
             ]
 
@@ -132,7 +135,6 @@ class ClaimXEventsDeltaWriter(BaseDeltaWriter):
                     "valid_count": len(valid_events),
                     "table_path": self.table_path,
                     "columns": df.columns,
-                    "sample_event": valid_events[0] if valid_events else {},
                 },
             )
 
