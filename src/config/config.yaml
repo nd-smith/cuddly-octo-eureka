@@ -357,7 +357,7 @@ eventhub:
 logging:
   level: ${LOG_LEVEL:-INFO}
   log_to_stdout: ${LOG_TO_STDOUT:-true}
-  log_dir: "/mnt/pcesdopodapp/logs"
+  log_dir: "/tmp/pcesdopodapp/logs"
 
   # File logging configuration
   file_logging:
