@@ -9,11 +9,11 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 
 from pipeline.tools.eventhub_ui.config import get_ssl_kwargs, list_eventhubs
+from pipeline.tools.eventhub_ui.routes import _helpers
 from pipeline.tools.eventhub_ui.routes._helpers import (
     conn_str_for_hub,
     error_response,
     find_hub,
-    templates,
 )
 
 logger = logging.getLogger(__name__)
@@ -40,7 +40,7 @@ def _cleanup_old_tasks():
 async def replay_form(request: Request):
     """Form for replaying messages."""
     hubs = list_eventhubs()
-    return templates.TemplateResponse(
+    return _helpers.templates.TemplateResponse(
         "replay.html",
         {
             "request": request,
@@ -87,7 +87,7 @@ async def replay_preview(
         logger.exception(f"Failed to preview replay from {source_hub}")
         return error_response(request, f"Error reading source: {e}")
 
-    return templates.TemplateResponse(
+    return _helpers.templates.TemplateResponse(
         "replay_preview.html",
         {
             "request": request,
@@ -188,7 +188,7 @@ async def replay_execute(
         )
     )
 
-    return templates.TemplateResponse(
+    return _helpers.templates.TemplateResponse(
         "replay_progress.html",
         {
             "request": request,
@@ -205,7 +205,7 @@ async def replay_status(request: Request, task_id: str):
     if not task:
         return error_response(request, f"Replay task '{task_id}' not found", 404)
 
-    return templates.TemplateResponse(
+    return _helpers.templates.TemplateResponse(
         "replay_progress.html",
         {
             "request": request,

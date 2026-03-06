@@ -13,10 +13,10 @@ from pipeline.tools.eventhub_ui.config import (
     get_ssl_kwargs,
     list_eventhubs,
 )
+from pipeline.tools.eventhub_ui.routes import _helpers
 from pipeline.tools.eventhub_ui.routes._helpers import (
     conn_str_for_hub,
     find_hub,
-    templates,
 )
 
 logger = logging.getLogger(__name__)
@@ -41,7 +41,7 @@ async def bulk_checkpoints_form(request: Request):
                 }
             )
 
-    return templates.TemplateResponse(
+    return _helpers.templates.TemplateResponse(
         "bulk_checkpoints.html",
         {
             "request": request,
@@ -62,7 +62,7 @@ async def bulk_checkpoints_preview(request: Request):
         if len(parts) == 2:
             groups.append({"eventhub_name": parts[0], "consumer_group": parts[1]})
 
-    return templates.TemplateResponse(
+    return _helpers.templates.TemplateResponse(
         "bulk_checkpoints_result.html",
         {
             "request": request,
@@ -125,7 +125,7 @@ async def bulk_checkpoints_execute(request: Request):
 
     results = await asyncio.gather(*tasks)
 
-    return templates.TemplateResponse(
+    return _helpers.templates.TemplateResponse(
         "bulk_checkpoints_result.html",
         {
             "request": request,

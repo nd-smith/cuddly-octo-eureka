@@ -1,8 +1,11 @@
 """Shared helpers for route modules."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from fastapi import Request
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 
 from pipeline.tools.eventhub_ui.config import (
     EventHubInfo,
@@ -11,7 +14,12 @@ from pipeline.tools.eventhub_ui.config import (
     list_eventhubs,
 )
 
-# Initialized by app.py after template setup
+if TYPE_CHECKING:
+    from fastapi.templating import Jinja2Templates
+
+# Initialized by app.py after template setup.
+# Route modules must access this via the module (e.g. _helpers.templates),
+# NOT via `from _helpers import templates`, which would capture None at import time.
 templates: Jinja2Templates = None  # type: ignore[assignment]
 
 

@@ -7,11 +7,11 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 
 from pipeline.tools.eventhub_ui.config import get_ssl_kwargs, list_eventhubs
+from pipeline.tools.eventhub_ui.routes import _helpers
 from pipeline.tools.eventhub_ui.routes._helpers import (
     conn_str_for_hub,
     error_response,
     find_hub,
-    templates,
 )
 
 logger = logging.getLogger(__name__)
@@ -22,7 +22,7 @@ router = APIRouter()
 @router.get("/search", response_class=HTMLResponse)
 async def search_form(request: Request):
     """Search form."""
-    return templates.TemplateResponse(
+    return _helpers.templates.TemplateResponse(
         "search.html",
         {
             "request": request,
@@ -77,7 +77,7 @@ async def search_execute(
         logger.exception(f"Search failed for {eventhub_name}")
         return error_response(request, f"Search error: {e}")
 
-    return templates.TemplateResponse(
+    return _helpers.templates.TemplateResponse(
         "search_results.html",
         {
             "request": request,

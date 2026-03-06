@@ -5,7 +5,8 @@ import logging
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 
-from pipeline.tools.eventhub_ui.routes._helpers import error_response, templates
+from pipeline.tools.eventhub_ui.routes import _helpers
+from pipeline.tools.eventhub_ui.routes._helpers import error_response
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +21,7 @@ async def dedup_overview(request: Request):
     config = get_dedup_config()
     workers = get_dedup_workers()
 
-    return templates.TemplateResponse(
+    return _helpers.templates.TemplateResponse(
         "dedup.html",
         {
             "request": request,
@@ -50,7 +51,7 @@ async def dedup_keys(request: Request, worker_name: str):
         logger.exception(f"Failed to list dedup keys for {worker_name}")
         return error_response(request, f"Error listing keys: {e}")
 
-    return templates.TemplateResponse(
+    return _helpers.templates.TemplateResponse(
         "dedup_keys.html",
         {
             "request": request,
@@ -84,7 +85,7 @@ async def dedup_check(
         logger.exception(f"Failed to check dedup key {key} for {worker_name}")
         return error_response(request, f"Error checking key: {e}")
 
-    return templates.TemplateResponse(
+    return _helpers.templates.TemplateResponse(
         "dedup_check_result.html",
         {
             "request": request,
@@ -115,7 +116,7 @@ async def dedup_cleanup(request: Request, worker_name: str):
         logger.exception(f"Failed to cleanup dedup for {worker_name}")
         return error_response(request, f"Error during cleanup: {e}")
 
-    return templates.TemplateResponse(
+    return _helpers.templates.TemplateResponse(
         "dedup_check_result.html",
         {
             "request": request,

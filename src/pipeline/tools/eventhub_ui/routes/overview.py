@@ -6,11 +6,11 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse
 
 from pipeline.tools.eventhub_ui.config import get_ssl_kwargs, list_eventhubs
+from pipeline.tools.eventhub_ui.routes import _helpers
 from pipeline.tools.eventhub_ui.routes._helpers import (
     conn_str_for_hub,
     error_response,
     find_hub,
-    templates,
 )
 
 logger = logging.getLogger(__name__)
@@ -27,7 +27,7 @@ async def overview(request: Request):
     for hub in hubs:
         domains.setdefault(hub.domain, []).append(hub)
 
-    return templates.TemplateResponse(
+    return _helpers.templates.TemplateResponse(
         "overview.html",
         {
             "request": request,
@@ -62,7 +62,7 @@ async def partitions(request: Request, eventhub_name: str):
         logger.exception(f"Failed to fetch partitions for {eventhub_name}")
         return error_response(request, f"Error connecting to '{eventhub_name}': {e}")
 
-    return templates.TemplateResponse(
+    return _helpers.templates.TemplateResponse(
         "partitions.html",
         {
             "request": request,
@@ -102,7 +102,7 @@ async def sampler(
         logger.exception(f"Failed to sample from {eventhub_name}/{partition_id}")
         return error_response(request, f"Error sampling messages: {e}")
 
-    return templates.TemplateResponse(
+    return _helpers.templates.TemplateResponse(
         "sampler.html",
         {
             "request": request,

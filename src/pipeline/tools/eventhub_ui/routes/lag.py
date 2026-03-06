@@ -16,11 +16,11 @@ from pipeline.tools.eventhub_ui.config import (
     get_ssl_kwargs,
     list_eventhubs,
 )
+from pipeline.tools.eventhub_ui.routes import _helpers
 from pipeline.tools.eventhub_ui.routes._helpers import (
     conn_str_for_hub,
     error_response,
     find_hub,
-    templates,
 )
 
 logger = logging.getLogger(__name__)
@@ -126,7 +126,7 @@ async def lag_overview(request: Request):
     """Show lag for all consumer groups across all EventHubs."""
     results, errors = await _fetch_all_lag()
 
-    return templates.TemplateResponse(
+    return _helpers.templates.TemplateResponse(
         "lag_overview.html",
         {
             "request": request,
@@ -157,7 +157,7 @@ async def lag_overview_data(request: Request):
 
     now = datetime.now(UTC).strftime("%H:%M:%S UTC")
 
-    return templates.TemplateResponse(
+    return _helpers.templates.TemplateResponse(
         "lag_overview_partial.html",
         {
             "request": request,
@@ -215,7 +215,7 @@ async def lag(request: Request, eventhub_name: str, consumer_group: str):
         )
         return error_response(request, f"Error calculating lag: {e}")
 
-    return templates.TemplateResponse(
+    return _helpers.templates.TemplateResponse(
         "lag.html",
         {
             "request": request,

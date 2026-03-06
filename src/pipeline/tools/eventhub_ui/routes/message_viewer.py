@@ -8,11 +8,11 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse
 
 from pipeline.tools.eventhub_ui.config import get_ssl_kwargs, list_eventhubs
+from pipeline.tools.eventhub_ui.routes import _helpers
 from pipeline.tools.eventhub_ui.routes._helpers import (
     conn_str_for_hub,
     error_response,
     find_hub,
-    templates,
 )
 
 logger = logging.getLogger(__name__)
@@ -42,7 +42,7 @@ async def message_viewer(request: Request, eventhub_name: str):
 
     partition_ids = [p.partition_id for p in partition_list]
 
-    return templates.TemplateResponse(
+    return _helpers.templates.TemplateResponse(
         "message_viewer.html",
         {
             "request": request,
@@ -120,7 +120,7 @@ async def message_viewer_fetch(
         logger.exception(f"Failed to fetch messages from {eventhub_name}")
         return error_response(request, f"Error fetching messages: {e}")
 
-    return templates.TemplateResponse(
+    return _helpers.templates.TemplateResponse(
         "message_viewer_results.html",
         {
             "request": request,

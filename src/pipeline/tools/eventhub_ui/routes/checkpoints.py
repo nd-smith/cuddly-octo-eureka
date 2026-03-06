@@ -12,11 +12,11 @@ from pipeline.tools.eventhub_ui.config import (
     get_checkpoint_container_name,
     get_ssl_kwargs,
 )
+from pipeline.tools.eventhub_ui.routes import _helpers
 from pipeline.tools.eventhub_ui.routes._helpers import (
     conn_str_for_hub,
     error_response,
     find_hub,
-    templates,
 )
 
 logger = logging.getLogger(__name__)
@@ -53,7 +53,7 @@ async def checkpoints_view(request: Request, eventhub_name: str, consumer_group:
         )
         return error_response(request, f"Error listing checkpoints: {e}")
 
-    return templates.TemplateResponse(
+    return _helpers.templates.TemplateResponse(
         "checkpoints.html",
         {
             "request": request,
@@ -97,7 +97,7 @@ async def checkpoints_advance(
         )
         return error_response(request, f"Error advancing checkpoints: {e}")
 
-    return templates.TemplateResponse(
+    return _helpers.templates.TemplateResponse(
         "checkpoint_result.html",
         {
             "request": request,
@@ -156,7 +156,7 @@ async def checkpoints_reset_to_time(
         )
         return error_response(request, f"Error resetting checkpoints: {e}")
 
-    return templates.TemplateResponse(
+    return _helpers.templates.TemplateResponse(
         "checkpoint_result.html",
         {
             "request": request,

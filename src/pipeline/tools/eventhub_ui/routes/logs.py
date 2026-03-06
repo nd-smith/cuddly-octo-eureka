@@ -6,7 +6,8 @@ import logging
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse
 
-from pipeline.tools.eventhub_ui.routes._helpers import error_response, templates
+from pipeline.tools.eventhub_ui.routes import _helpers
+from pipeline.tools.eventhub_ui.routes._helpers import error_response
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,7 @@ async def logs_browse(request: Request):
     except Exception as e:
         return error_response(request, f"Error connecting to OneLake: {e}")
 
-    return templates.TemplateResponse(
+    return _helpers.templates.TemplateResponse(
         "logs_browse.html",
         {
             "request": request,
@@ -58,7 +59,7 @@ async def logs_view(
 
     filename = path.split("/")[-1]
 
-    return templates.TemplateResponse(
+    return _helpers.templates.TemplateResponse(
         "logs_view.html",
         {
             "request": request,
@@ -83,7 +84,7 @@ async def logs_dates(request: Request, domain: str):
     except Exception as e:
         return error_response(request, f"Error listing dates for '{domain}': {e}")
 
-    return templates.TemplateResponse(
+    return _helpers.templates.TemplateResponse(
         "logs_dates.html",
         {
             "request": request,
@@ -105,7 +106,7 @@ async def logs_files(request: Request, domain: str, date: str):
             request, f"Error listing files for '{domain}/{date}': {e}"
         )
 
-    return templates.TemplateResponse(
+    return _helpers.templates.TemplateResponse(
         "logs_files.html",
         {
             "request": request,

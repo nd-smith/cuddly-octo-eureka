@@ -6,11 +6,11 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 
 from pipeline.tools.eventhub_ui.config import get_ssl_kwargs, list_eventhubs
+from pipeline.tools.eventhub_ui.routes import _helpers
 from pipeline.tools.eventhub_ui.routes._helpers import (
     conn_str_for_hub,
     error_response,
     find_hub,
-    templates,
 )
 
 logger = logging.getLogger(__name__)
@@ -21,7 +21,7 @@ router = APIRouter()
 @router.get("/inject", response_class=HTMLResponse)
 async def inject_form(request: Request):
     """Form for injecting messages."""
-    return templates.TemplateResponse(
+    return _helpers.templates.TemplateResponse(
         "injector.html",
         {
             "request": request,
@@ -42,7 +42,7 @@ async def inject_preview(
 
     is_valid, formatted_or_error, byte_size = validate_json(body)
 
-    return templates.TemplateResponse(
+    return _helpers.templates.TemplateResponse(
         "injector_preview.html",
         {
             "request": request,
@@ -84,7 +84,7 @@ async def inject_send(
     except Exception as e:
         logger.exception(f"Failed to inject message to {eventhub_name}")
         result_data = {"success": False, "error": str(e)}
-        return templates.TemplateResponse(
+        return _helpers.templates.TemplateResponse(
             "injector_result.html",
             {
                 "request": request,
@@ -93,7 +93,7 @@ async def inject_send(
             },
         )
 
-    return templates.TemplateResponse(
+    return _helpers.templates.TemplateResponse(
         "injector_result.html",
         {
             "request": request,
