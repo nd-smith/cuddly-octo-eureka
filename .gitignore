@@ -1,7 +1,49 @@
+# Byte-compiled / optimized / DLL files
 __pycache__/
-*.pyc
-.DS_Store
-.env
-.coverage
-test-results/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+build/
+dist/
 *.egg-info/
+*.egg
+wheels/
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Testing / Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+test-results/
+.tox/
+.nox/
+
+# mypy
+.mypy_cache/
+
+# ruff
+.ruff_cache/
+
+# Environment variables
+.env
+.env.*
+
+# OS files
+.DS_Store
+Thumbs.db
