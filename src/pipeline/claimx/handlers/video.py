@@ -47,14 +47,13 @@ class VideoCollabHandler(EventHandler):
 
         try:
             # 1. Fetch video collaboration report
-            response = await self.client.get_video_collaboration(event.project_id)
+            response = await self.client.get_video_collaboration(int(event.project_id))
 
             collab_data = self._extract_collab_data(response, event.project_id)
 
             rows = EntityRowsMessage()
 
-            # 2. In-flight Project Verification
-            # We need to ensure the project exists in our warehouse
+            # 2. Ensure project exists in warehouse
             project_rows = await self.ensure_project_exists(
                 int(event.project_id),
                 trace_id=event.trace_id,
@@ -85,7 +84,6 @@ class VideoCollabHandler(EventHandler):
             if video_row.get("video_collaboration_id") is not None:
                 rows.video_collab.append(video_row)
 
-            # Produce enriched video event to downstream EventHub
             production_failed = False
             if self.video_event_producer:
                 try:

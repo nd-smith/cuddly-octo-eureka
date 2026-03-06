@@ -104,7 +104,7 @@ def mock_circuit_breaker():
     circuit.record_success = MagicMock()
     circuit.record_failure = MagicMock()
     circuit.get_diagnostics = MagicMock(return_value={"state": "closed", "failures": 0})
-    circuit._get_retry_after = MagicMock(return_value=60.0)
+    circuit.get_retry_after = MagicMock(return_value=60.0)
     return circuit
 
 
@@ -487,7 +487,7 @@ class TestClaimXApiClientEndpoints:
                 await api_client.get_project_media(123, media_ids=[456, 789])
 
                 call_kwargs = mock_req.call_args[1]
-                assert call_kwargs["params"] == {"mediaIds": "456,789"}
+                assert call_kwargs["params"] == {"mediaId": "456,789"}
 
     @pytest.mark.asyncio
     async def test_get_project_contacts(self, api_client):
@@ -564,7 +564,7 @@ class TestClaimXApiClientEndpoints:
 
         with patch("aiohttp.ClientSession.request", return_value=mock_response) as mock_req:
             async with api_client:
-                await api_client.get_video_collaboration("123")
+                await api_client.get_video_collaboration(123)
 
                 # Check POST was made to /data
                 assert mock_req.call_args[0][0] == "POST"
@@ -588,7 +588,7 @@ class TestClaimXApiClientEndpoints:
 
         with patch("aiohttp.ClientSession.request", return_value=mock_response) as mock_req:
             async with api_client:
-                await api_client.get_video_collaboration("123", start_date=start, end_date=end)
+                await api_client.get_video_collaboration(123, start_date=start, end_date=end)
 
                 body = mock_req.call_args[1]["json"]
                 assert body["startDate"] == start.isoformat()

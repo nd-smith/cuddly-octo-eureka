@@ -8,11 +8,11 @@ from typing import Any
 
 import aiohttp
 
+from core.logging.context import get_log_context
 from core.resilience.circuit_breaker import (
     CLAIMX_API_CIRCUIT_CONFIG,
     get_circuit_breaker,
 )
-from core.logging.context import get_log_context
 from core.resilience.rate_limiter import (
     CLAIMX_API_RATE_CONFIG,
     get_rate_limiter,
@@ -90,7 +90,7 @@ class ClaimXApiClient:
         token: str,
         timeout_seconds: int = 30,
         max_concurrent: int = 20,
-        sender_username: str = "nsmkd@allstate.com",
+        sender_username: str = "",
     ):
         self.base_url = base_url.rstrip("/") if base_url else ""
 
@@ -100,7 +100,6 @@ class ClaimXApiClient:
                 "Set CLAIMX_API_URL environment variable or configure claimx_api.base_url in config."
             )
 
-        # Validate base_url has a scheme (http/https)
         if not self.base_url.startswith(("http://", "https://")):
             raise ValueError(
                 f"ClaimXApiClient base_url must start with http:// or https://, got: {self.base_url!r}. "
@@ -121,7 +120,6 @@ class ClaimXApiClient:
         self._circuit = get_circuit_breaker("claimx_api", CLAIMX_API_CIRCUIT_CONFIG)
         self._rate_limiter = get_rate_limiter("claimx_api", CLAIMX_API_RATE_CONFIG)
 
-        # Log configuration at startup for debugging
         logger.info(
             "ClaimXApiClient initialized",
             extra={
@@ -214,8 +212,7 @@ class ClaimXApiClient:
         endpoint: str,
         params: dict[str, Any] | None = None,
         json_body: dict[str, Any] | None = None,
-        _auth_retry: bool = False,
-    ) -> dict[str, Any]:
+    ) -> Any:
         await self._ensure_session()
 
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
@@ -235,7 +232,7 @@ class ClaimXApiClient:
         )
 
         if self._circuit.is_open:
-            retry_after = self._circuit._get_retry_after()
+            retry_after = self._circuit.get_retry_after()
             error = ClaimXApiError(
                 f"Circuit open, retry after {retry_after:.0f}s",
                 category=ErrorCategory.CIRCUIT_OPEN,
@@ -256,11 +253,10 @@ class ClaimXApiClient:
 
         request_headers = {"Authorization": self._auth_header}
 
-        # Rate limiting - controls throughput to prevent hitting API rate limits
         await self._rate_limiter.acquire()
 
         async with self._semaphore:
-            start_time = asyncio.get_event_loop().time()
+            start_time = asyncio.get_running_loop().time()
             try:
                 if self._session is None:
                     raise RuntimeError(
@@ -274,9 +270,9 @@ class ClaimXApiClient:
                     headers=request_headers,
                     timeout=aiohttp.ClientTimeout(total=self.timeout_seconds),
                 ) as response:
-                    duration = asyncio.get_event_loop().time() - start_time
+                    duration = asyncio.get_running_loop().time() - start_time
 
-                    if response.status != 200:
+                    if not (200 <= response.status < 300):
                         await self._handle_error_response(
                             response, url, endpoint, method, duration
                         )
@@ -301,7 +297,7 @@ class ClaimXApiClient:
                     return data
 
             except TimeoutError as e:
-                duration = asyncio.get_event_loop().time() - start_time
+                duration = asyncio.get_running_loop().time() - start_time
                 error = ClaimXApiError(
                     f"Timeout after {self.timeout_seconds}s: {url}",
                     category=ErrorCategory.TRANSIENT,
@@ -324,7 +320,7 @@ class ClaimXApiClient:
                 raise error from e
 
             except aiohttp.ClientError as e:
-                duration = asyncio.get_event_loop().time() - start_time
+                duration = asyncio.get_running_loop().time() - start_time
                 error = ClaimXApiError(
                     f"Connection error: {e}",
                     category=ErrorCategory.TRANSIENT,
@@ -383,7 +379,7 @@ class ClaimXApiClient:
     ) -> list[dict[str, Any]]:
         """Get media metadata for a project. Used for PROJECT_FILE_ADDED events."""
         params = {}
-        if media_ids:
+        if media_ids is not None:
             params["mediaId"] = ",".join(str(m) for m in media_ids)
 
         response = await self._request(
@@ -403,6 +399,7 @@ class ClaimXApiClient:
         return []
 
     async def get_project_contacts(self, project_id: int) -> list[dict[str, Any]]:
+        """Get contacts for a project. Used for PROJECT_CONTACT_ADDED events."""
         response = await self._request(
             "GET",
             f"/export/project/{project_id}/contacts",
@@ -427,6 +424,7 @@ class ClaimXApiClient:
         )
 
     async def get_project_tasks(self, project_id: int) -> list[dict[str, Any]]:
+        """Get custom task high-level report for a project. Used for CUSTOM_TASK events."""
         body = {
             "reportType": "CUSTOM_TASK_HIGH_LEVEL",
             "projectId": project_id,
@@ -441,7 +439,7 @@ class ClaimXApiClient:
 
     async def get_video_collaboration(
         self,
-        project_id: str,
+        project_id: int,
         start_date: datetime | None = None,
         end_date: datetime | None = None,
         sender_username: str | None = None,
@@ -449,7 +447,7 @@ class ClaimXApiClient:
         """Get video collaboration report. Used for VIDEO_COLLABORATION_INVITE_SENT, VIDEO_COLLABORATION_COMPLETED events."""
         body: dict[str, Any] = {
             "reportType": "VIDEO_COLLABORATION",
-            "projectId": int(project_id),
+            "projectId": project_id,
             "senderUsername": sender_username or self.sender_username,
         }
 
@@ -461,6 +459,7 @@ class ClaimXApiClient:
         return await self._request("POST", "/data", json_body=body)
 
     async def get_project_conversations(self, project_id: int) -> list[dict[str, Any]]:
+        """Get conversations for a project. Used for PROJECT_CONVERSATION events."""
         response = await self._request(
             "GET",
             f"/export/project/{project_id}/conversations",

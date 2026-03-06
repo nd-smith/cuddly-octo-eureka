@@ -383,6 +383,11 @@ class CircuitBreaker:
         elapsed = time.time() - self._last_failure_time
         return max(0, self.config.timeout_seconds - elapsed)
 
+    def get_retry_after(self) -> float:
+        """Return seconds remaining before circuit transitions from open to half-open."""
+        with self._lock:
+            return self._get_retry_after()
+
     async def call_async(self, func: Callable[[], T]) -> T:
         with self._lock:
             self._stats.total_calls += 1

@@ -109,10 +109,26 @@ Tracking review progress layer-by-layer through the ClaimX pipeline.
 
 ---
 
-## Up Next
+### 6. API Client (`src/pipeline/claimx/api_client.py`)
+- **Reviewed:** 2026-03-05
+- **Files:** `api_client.py`, `core/resilience/circuit_breaker.py`, `handlers/video.py`
+- **Issues found:** 2 high, 4 medium, 3 low — all fixed
+- **Tests updated:** `test_api_client.py` (signature changes, param name fix)
+- **Key fixes:**
+  - **H1:** `get_video_collaboration(project_id: str)` inconsistent with all other methods (`int`) — changed to `int`, removed `int(project_id)` cast, updated handler call site
+  - **H2:** `_request` return type `dict[str, Any]` wrong — `response.json()` can return `list`, `int`, etc. Changed to `Any`
+  - **M1:** Hardcoded default `sender_username="nsmkd@allstate.com"` (PII) — changed to `""`
+  - **M2:** `_auth_retry` parameter in `_request()` was dead code — removed
+  - **M3:** `if media_ids:` skipped empty list `[]` — changed to `if media_ids is not None:`
+  - **M4:** Only HTTP 200 treated as success — changed to `200 <= status < 300` for all 2xx
+  - **L1:** Added missing docstrings to `get_project_contacts`, `get_project_tasks`, `get_project_conversations`
+  - **L2:** Private `self._circuit._get_retry_after()` access — added public `get_retry_after()` to `CircuitBreaker`
+  - **L3:** Deprecated `asyncio.get_event_loop().time()` — replaced with `asyncio.get_running_loop().time()`
+- **Bonus:** Fixed pre-existing test bug: `mediaIds` → `mediaId` param name mismatch; fixed import sort order
 
-### 6. API Client (`src/pipeline/claimx/`)
-- `api_client.py` — ClaimX REST API client (auth, endpoints, error handling)
+---
+
+## Up Next
 
 ### 7. Pipeline Initialization & Orchestration
 - `src/pipeline/__main__.py` — Entry point: arg parsing, env setup, logging, signal handlers, worker startup
