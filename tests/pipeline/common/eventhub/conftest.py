@@ -25,8 +25,18 @@ def mock_azure_modules():
     mock_storage_blob = MagicMock()
     mock_storage_blob_aio = MagicMock()
 
+    # azure.core.exceptions needs real exception classes for isinstance checks
+    mock_core_exceptions = MagicMock()
+
+    class ResourceNotFoundError(Exception):
+        pass
+
+    mock_core_exceptions.ResourceNotFoundError = ResourceNotFoundError
+
     modules_to_mock = {
         "azure": MagicMock(),
+        "azure.core": MagicMock(),
+        "azure.core.exceptions": mock_core_exceptions,
         "azure.eventhub": mock_eventhub,
         "azure.eventhub.aio": mock_eventhub_aio,
         "azure.eventhub.extensions": MagicMock(),

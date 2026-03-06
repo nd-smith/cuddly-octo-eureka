@@ -115,7 +115,7 @@ class EventHubConsumerRecord:
         self._message = PipelineMessage(
             topic=eventhub_name,
             partition=int(partition) if partition else 0,
-            offset=event_data.offset if hasattr(event_data, "offset") else 0,
+            offset=int(event_data.offset) if getattr(event_data, "offset", None) is not None else 0,
             timestamp=timestamp_ms,
             key=self._extract_key(event_data.properties),
             value=event_data.body if isinstance(event_data.body, bytes) else b"".join(event_data.body),

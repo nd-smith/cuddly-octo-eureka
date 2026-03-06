@@ -10,9 +10,6 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from core.types import ErrorCategory
-from pipeline.common.metrics import (
-    record_dlq_message,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -208,21 +205,6 @@ def log_retry_decision(
         )
 
 
-def record_dlq_metrics(
-    domain: str,
-    reason: str,
-    error_category: ErrorCategory | None = None,
-) -> None:
-    """
-    Record DLQ routing metrics.
-
-    Args:
-        domain: Domain identifier (e.g., "verisk", "claimx")
-        reason: Reason for DLQ routing ("permanent", "exhausted")
-        error_category: Optional error classification for exhausted retries
-    """
-    record_dlq_message(domain=domain, reason=reason)
-
 
 __all__ = [
     "should_send_to_dlq",
@@ -232,5 +214,4 @@ __all__ = [
     "truncate_error_message",
     "add_error_metadata_to_dict",
     "log_retry_decision",
-    "record_dlq_metrics",
 ]

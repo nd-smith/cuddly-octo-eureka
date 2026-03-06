@@ -119,7 +119,6 @@ class JsonCheckpointStore:
 
             for ownership in ownership_items:
                 partition_id = ownership["partition_id"]
-                ownership.get("owner_id", "UNKNOWN")
                 existing = data["partitions"].get(partition_id)
 
                 # Claim succeeds if no existing owner or etag matches

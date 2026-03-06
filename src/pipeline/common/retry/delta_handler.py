@@ -167,11 +167,6 @@ class DeltaRetryHandler:
         )
         await self._retry_producer.start()
 
-        # Sync topic with producer's actual entity name (Event Hub entity may
-        # differ from the Kafka topic name resolved by get_topic()).
-        if hasattr(self._retry_producer, "eventhub_name"):
-            self._retry_topic_resolved = self._retry_producer.eventhub_name
-
         self._dlq_producer = create_producer(
             config=self.config,
             domain=self.domain,

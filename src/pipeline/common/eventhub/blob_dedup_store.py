@@ -17,6 +17,7 @@ import logging
 import time
 from typing import Any
 
+from azure.core.exceptions import ResourceNotFoundError
 from azure.storage.blob.aio import BlobServiceClient, ContainerClient
 
 from core.security.ssl_utils import get_ca_bundle_kwargs
@@ -138,16 +139,15 @@ class BlobDedupStore:
                 )
                 return False, None
 
+        except ResourceNotFoundError:
+            logger.debug(f"Key not found in blob storage: {worker_name}/{key}")
+            return False, None
         except Exception as e:
-            # Blob doesn't exist or other error
-            if "BlobNotFound" in str(e):
-                logger.debug(f"Key not found in blob storage: {worker_name}/{key}")
-            else:
-                logger.warning(
-                    "Error checking blob storage for duplicate",
-                    extra={"worker": worker_name, "key": key, "error": str(e)},
-                    exc_info=False,
-                )
+            logger.warning(
+                "Error checking blob storage for duplicate",
+                extra={"worker": worker_name, "key": key, "error": str(e)},
+                exc_info=False,
+            )
             return False, None
 
     async def mark_processed(

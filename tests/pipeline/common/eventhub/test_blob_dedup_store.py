@@ -169,10 +169,14 @@ class TestBlobDedupStoreCheckDuplicate:
         assert metadata is None
 
     async def test_returns_false_when_blob_not_found(self):
+        from azure.core.exceptions import ResourceNotFoundError
+
         store = self._make_store()
 
         mock_blob_client = MagicMock()
-        mock_blob_client.get_blob_properties = AsyncMock(side_effect=Exception("BlobNotFound"))
+        mock_blob_client.get_blob_properties = AsyncMock(
+            side_effect=ResourceNotFoundError("BlobNotFound")
+        )
         store._container.get_blob_client.return_value = mock_blob_client
 
         is_dup, metadata = await store.check_duplicate("worker", "key1", 3600)
@@ -193,10 +197,14 @@ class TestBlobDedupStoreCheckDuplicate:
         assert metadata is None
 
     async def test_uses_correct_blob_path(self):
+        from azure.core.exceptions import ResourceNotFoundError
+
         store = self._make_store()
 
         mock_blob_client = MagicMock()
-        mock_blob_client.get_blob_properties = AsyncMock(side_effect=Exception("BlobNotFound"))
+        mock_blob_client.get_blob_properties = AsyncMock(
+            side_effect=ResourceNotFoundError("BlobNotFound")
+        )
         store._container.get_blob_client.return_value = mock_blob_client
 
         await store.check_duplicate("my-worker", "trace-abc", 3600)

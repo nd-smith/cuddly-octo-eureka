@@ -9,7 +9,6 @@ Test Coverage:
     - truncate_error_message: short messages, long messages, boundary
     - add_error_metadata_to_dict: modifies dict in place
     - log_retry_decision: all action types logged correctly
-    - record_dlq_metrics: delegates to record_dlq_message
 """
 
 from datetime import UTC, datetime, timedelta
@@ -22,7 +21,6 @@ from pipeline.common.retry.retry_utils import (
     create_dlq_headers,
     create_retry_headers,
     log_retry_decision,
-    record_dlq_metrics,
     should_send_to_dlq,
     truncate_error_message,
 )
@@ -331,21 +329,3 @@ class TestLogRetryDecision:
             mock_logger.info.assert_not_called()
 
 
-class TestRecordDlqMetrics:
-    """Test record_dlq_metrics."""
-
-    def test_delegates_to_record_dlq_message(self):
-        """record_dlq_metrics calls record_dlq_message with correct args."""
-        with patch("pipeline.common.retry.retry_utils.record_dlq_message") as mock_record:
-            record_dlq_metrics(domain="verisk", reason="permanent")
-            mock_record.assert_called_once_with(domain="verisk", reason="permanent")
-
-    def test_accepts_optional_error_category(self):
-        """record_dlq_metrics accepts optional error_category."""
-        with patch("pipeline.common.retry.retry_utils.record_dlq_message") as mock_record:
-            record_dlq_metrics(
-                domain="claimx",
-                reason="exhausted",
-                error_category=ErrorCategory.TRANSIENT,
-            )
-            mock_record.assert_called_once_with(domain="claimx", reason="exhausted")

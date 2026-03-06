@@ -350,6 +350,27 @@ class TestFlushPartitionBatch:
 
         ctx.update_checkpoint.assert_not_awaited()
 
+    async def test_checkpoint_failure_does_not_increment_count(self):
+        from pipeline.common.eventhub.batch_consumer import BufferedMessage
+
+        handler = AsyncMock(return_value=True)
+        consumer = self._make_consumer(handler=handler)
+
+        msg = PipelineMessage(topic="t", partition=0, offset=0, timestamp=0, value=b"a")
+        ctx = AsyncMock()
+        ctx.update_checkpoint = AsyncMock(side_effect=RuntimeError("checkpoint fail"))
+        event = MagicMock()
+
+        consumer._batch_buffers["0"] = [BufferedMessage(ctx, event, msg)]
+        consumer._batch_timers["0"] = time.time()
+        consumer._flush_locks["0"] = asyncio.Lock()
+
+        before_count = consumer._batch_checkpoint_count
+
+        await consumer._flush_partition_batch("0")
+
+        assert consumer._batch_checkpoint_count == before_count
+
     async def test_flush_continues_on_checkpoint_error(self):
         from pipeline.common.eventhub.batch_consumer import BufferedMessage
 

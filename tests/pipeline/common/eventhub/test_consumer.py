@@ -45,7 +45,7 @@ class TestEventHubConsumerRecord:
 
         assert msg.topic == "my-entity"
         assert msg.partition == 3
-        assert msg.offset == "42"
+        assert msg.offset == 42
         assert msg.value == b'{"key": "value"}'
         assert msg.timestamp > 0
 
@@ -107,6 +107,17 @@ class TestEventHubConsumerRecord:
         msg = record.to_pipeline_message()
 
         assert msg.timestamp == 0
+
+    def test_handles_none_offset(self):
+        from pipeline.common.eventhub.consumer import EventHubConsumerRecord
+
+        event = self._make_event_data()
+        event.offset = None
+
+        record = EventHubConsumerRecord(event, "entity", "0")
+        msg = record.to_pipeline_message()
+
+        assert msg.offset == 0
 
     def test_handles_empty_partition_string(self):
         from pipeline.common.eventhub.consumer import EventHubConsumerRecord

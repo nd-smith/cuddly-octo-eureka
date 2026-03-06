@@ -692,25 +692,24 @@ class EventHubBatchConsumer:
         last = batch[-1]
         try:
             await last.partition_context.update_checkpoint(last.event)
+            self._batch_checkpoint_count += 1
+            log_level = logging.INFO if self._batch_checkpoint_count % 100 == 0 else logging.DEBUG
+            log_msg = "Batch checkpoint heartbeat" if log_level == logging.INFO else "Batch checkpointed"
+            extra = {
+                "partition_id": partition_id,
+                "batch_size": len(batch),
+                "duration_ms": round(duration * 1000, 2),
+            }
+            if log_level == logging.INFO:
+                extra["total_batches_checkpointed"] = self._batch_checkpoint_count
+                extra["consumer_group"] = self.consumer_group
+            logger.log(log_level, log_msg, extra=extra)
         except Exception:
             logger.error(
                 "Failed to checkpoint batch - messages will be redelivered",
                 extra={"partition_id": partition_id, "offset": last.message.offset, "batch_size": len(batch)},
                 exc_info=True,
             )
-
-        self._batch_checkpoint_count += 1
-        log_level = logging.INFO if self._batch_checkpoint_count % 100 == 0 else logging.DEBUG
-        log_msg = "Batch checkpoint heartbeat" if log_level == logging.INFO else "Batch checkpointed"
-        extra = {
-            "partition_id": partition_id,
-            "batch_size": len(batch),
-            "duration_ms": round(duration * 1000, 2),
-        }
-        if log_level == logging.INFO:
-            extra["total_batches_checkpointed"] = self._batch_checkpoint_count
-            extra["consumer_group"] = self.consumer_group
-        logger.log(log_level, log_msg, extra=extra)
 
     async def _route_to_dlq(self, msg: PipelineMessage, error: Exception) -> bool:
         """Route a permanently failed message to the DLQ Event Hub entity.
