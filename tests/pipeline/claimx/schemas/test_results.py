@@ -312,10 +312,10 @@ class TestClaimXUploadResultMessageEdgeCases:
         assert result.bytes_uploaded == 0
         assert result.status == "completed"
 
-    def test_long_error_message(self):
-        """ClaimXUploadResultMessage handles long error messages."""
+    def test_long_error_message_within_limit(self):
+        """ClaimXUploadResultMessage accepts error messages up to 500 chars."""
         now = datetime.now(UTC)
-        long_error = "Error: " + "x" * 1000
+        error_at_limit = "E" * 500
         result = ClaimXUploadResultMessage(
             media_id="media_error",
             project_id="proj_456",
@@ -324,11 +324,27 @@ class TestClaimXUploadResultMessageEdgeCases:
             trace_id="evt_123",
             status="failed_permanent",
             bytes_uploaded=0,
-            error_message=long_error,
+            error_message=error_at_limit,
             created_at=now,
         )
 
-        assert result.error_message == long_error
+        assert result.error_message == error_at_limit
+
+    def test_error_message_exceeding_limit_raises_error(self):
+        """ClaimXUploadResultMessage rejects error messages over 500 chars."""
+        now = datetime.now(UTC)
+        with pytest.raises(ValidationError):
+            ClaimXUploadResultMessage(
+                media_id="media_error",
+                project_id="proj_456",
+                download_url="https://s3.amazonaws.com/claimx/presigned/photo.jpg",
+                blob_path="claimx/proj_456/media/photo.jpg",
+                trace_id="evt_123",
+                status="failed_permanent",
+                bytes_uploaded=0,
+                error_message="E" * 501,
+                created_at=now,
+            )
 
     def test_large_file_upload(self):
         """ClaimXUploadResultMessage handles large file sizes."""

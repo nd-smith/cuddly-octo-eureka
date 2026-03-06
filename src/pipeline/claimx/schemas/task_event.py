@@ -6,9 +6,9 @@ message for real-time downstream consumption.
 """
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_serializer, field_validator
 
 
 class ClaimXTaskEvent(BaseModel):
@@ -24,11 +24,11 @@ class ClaimXTaskEvent(BaseModel):
     """
 
     # Event metadata
-    trace_id: str = Field(..., description="Correlation ID from source event")
-    event_type: str = Field(..., description="CUSTOM_TASK_ASSIGNED or CUSTOM_TASK_COMPLETED")
+    trace_id: str = Field(..., description="Correlation ID from source event", min_length=1)
+    event_type: str = Field(..., description="CUSTOM_TASK_ASSIGNED or CUSTOM_TASK_COMPLETED", min_length=1)
 
     # Project fields (from project export)
-    project_id: str = Field(..., description="ClaimX project ID")
+    project_id: str = Field(..., description="ClaimX project ID", min_length=1)
     claim_number: str | None = Field(default=None, description="Project number / claim number")
     project_status: str | None = Field(default=None, description="Project status")
     customer_firstname: str | None = Field(default=None, description="Customer first name")
@@ -47,7 +47,7 @@ class ClaimXTaskEvent(BaseModel):
     )
 
     # Task fields (from task export)
-    task_assignment_id: int | None = Field(default=None, description="Task assignment ID")
+    task_assignment_id: str | None = Field(default=None, description="Task assignment ID")
     task_id: int | None = Field(default=None, description="Task template ID")
     form_id: str | None = Field(default=None, description="Form ID")
     task_name: str | None = Field(default=None, description="Task name")
@@ -80,6 +80,17 @@ class ClaimXTaskEvent(BaseModel):
     report_name: str | None = Field(default=None, description="Report media description")
     media_id: str | None = Field(default=None, description="Media ID from media export response")
 
+    # Timestamp for pipeline latency measurement
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        description="Timestamp when this event was created",
+    )
+
+    @field_serializer("created_at")
+    def serialize_timestamp(self, timestamp: datetime) -> str:
+        """Serialize datetime to ISO 8601 format."""
+        return timestamp.isoformat()
+
     model_config = {
         "json_schema_extra": {
             "examples": [
@@ -96,7 +107,7 @@ class ClaimXTaskEvent(BaseModel):
                     "loss_address_state_province": "FL",
                     "loss_address_zip_postcode": "32162",
                     "mfn": "06QYL5W",
-                    "task_assignment_id": 5550810,
+                    "task_assignment_id": "5550810",
                     "task_id": 7085,
                     "form_id": "5e4eb0a494511a44fd3851b9",
                     "task_name": "File Request - Property",

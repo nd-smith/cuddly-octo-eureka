@@ -8,7 +8,7 @@ This module contains Pydantic models for:
 - ClaimX upload result messages
 
 Schemas:
-    events.py    - ClaimXEventMessage (raw ClaimX events from Eventhouse)
+    events.py    - ClaimXEventMessage (raw ClaimX events from EventHub)
     tasks.py     - ClaimXEnrichmentTask, ClaimXDownloadTask (work items for workers)
     entities.py  - EntityRowsMessage (entity data container for 7 entity types)
     cached.py    - ClaimXCachedDownloadMessage (cached downloads awaiting upload)
@@ -25,11 +25,17 @@ Design Decisions:
 from pipeline.claimx.schemas.cached import ClaimXCachedDownloadMessage
 from pipeline.claimx.schemas.entities import EntityRowsMessage
 from pipeline.claimx.schemas.events import ClaimXEventMessage
-from pipeline.claimx.schemas.results import ClaimXUploadResultMessage
+from pipeline.claimx.schemas.results import (
+    ClaimXUploadResultMessage,
+    FailedDownloadMessage,
+    FailedEnrichmentMessage,
+)
+from pipeline.claimx.schemas.task_event import ClaimXTaskEvent
 from pipeline.claimx.schemas.tasks import (
     ClaimXDownloadTask,
     ClaimXEnrichmentTask,
 )
+from pipeline.claimx.schemas.video_event import ClaimXVideoCollabEvent
 
 __all__ = [
     "ClaimXEventMessage",
@@ -37,5 +43,9 @@ __all__ = [
     "ClaimXDownloadTask",
     "ClaimXCachedDownloadMessage",
     "ClaimXUploadResultMessage",
+    "ClaimXTaskEvent",
+    "ClaimXVideoCollabEvent",
+    "FailedEnrichmentMessage",
+    "FailedDownloadMessage",
     "EntityRowsMessage",
 ]

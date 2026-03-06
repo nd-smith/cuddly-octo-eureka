@@ -7,7 +7,7 @@ Schema aligned with verisk_pipeline ClaimXEvent for compatibility.
 
 import hashlib
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
@@ -84,7 +84,13 @@ class ClaimXEventMessage(BaseModel):
         default=None, description="List of media IDs (for CUSTOM_TASK_COMPLETED events)"
     )
     raw_data: dict[str, Any] | None = Field(
-        default=None, description="Raw event payload for handler-specific parsing"
+        default=None,
+        description=(
+            "Raw event payload for handler-specific parsing. "
+            "Stores the full original payload to support handler-specific field extraction "
+            "without schema changes. Trade-off: increases message size but avoids "
+            "information loss during event routing."
+        ),
     )
 
     @field_validator("trace_id", "event_type", "project_id")
@@ -133,7 +139,7 @@ class ClaimXEventMessage(BaseModel):
         ingested_at = cls._get_field(row, "ingested_at", "ingestedAt")
         if not ingested_at:
             logger.warning("Missing ingested_at for event (project_id=%s, event_type=%s), falling back to datetime.now()", project_id, event_type)
-            ingested_at = datetime.now()
+            ingested_at = datetime.now(UTC)
 
         media_id = cls._get_field(row, "media_id", "mediaId")
         task_id = cls._get_field(row, "task_assignment_id", "taskAssignmentId")

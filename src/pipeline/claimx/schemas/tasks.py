@@ -85,14 +85,6 @@ class ClaimXEnrichmentTask(BaseModel):
             raise ValueError(f"{info.field_name} cannot be empty or whitespace")
         return v.strip()
 
-    @field_validator("retry_count")
-    @classmethod
-    def validate_retry_count(cls, v: int) -> int:
-        """Ensure retry_count is non-negative."""
-        if v < 0:
-            raise ValueError("retry_count must be non-negative")
-        return v
-
     @field_serializer("created_at", "ingested_at")
     def serialize_timestamp(self, timestamp: datetime) -> str:
         """Serialize datetime to ISO 8601 format."""
@@ -167,8 +159,8 @@ class ClaimXDownloadTask(BaseModel):
         ..., description="ID of the event that triggered this download", min_length=1
     )
     retry_count: int = Field(default=0, description="Number of retry attempts (starts at 0)", ge=0)
-    expires_at: str | None = Field(
-        default=None, description="ISO datetime when presigned URL expires"
+    expires_at: datetime | None = Field(
+        default=None, description="Datetime when presigned URL expires"
     )
     refresh_count: int = Field(
         default=0,
@@ -188,6 +180,14 @@ class ClaimXDownloadTask(BaseModel):
             raise ValueError(f"{info.field_name} cannot be empty or whitespace")
         return v.strip()
 
+    @field_validator("expires_at", mode="before")
+    @classmethod
+    def parse_expires_at(cls, v: Any) -> Any:
+        """Accept ISO 8601 strings for expires_at (backward compatibility)."""
+        if isinstance(v, str):
+            return datetime.fromisoformat(v)
+        return v
+
     @field_validator("retry_count", "refresh_count")
     @classmethod
     def validate_non_negative(cls, v: int, info) -> int:
@@ -195,6 +195,11 @@ class ClaimXDownloadTask(BaseModel):
         if v < 0:
             raise ValueError(f"{info.field_name} must be non-negative")
         return v
+
+    @field_serializer("expires_at")
+    def serialize_expires_at(self, v: datetime | None) -> str | None:
+        """Serialize expires_at to ISO 8601 format."""
+        return v.isoformat() if v else None
 
     model_config = {
         "coerce_numbers_to_str": True,

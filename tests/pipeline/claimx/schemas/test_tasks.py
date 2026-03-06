@@ -222,7 +222,7 @@ class TestClaimXDownloadTaskCreation:
         assert task.file_name == "photo.jpg"
         assert task.trace_id == "evt_123"
         assert task.retry_count == 2
-        assert task.expires_at == "2024-12-26T10:30:00Z"
+        assert task.expires_at == datetime(2024, 12, 26, 10, 30, tzinfo=UTC)
         assert task.refresh_count == 1
 
     def test_create_with_video_file(self):

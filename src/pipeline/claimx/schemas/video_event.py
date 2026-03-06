@@ -5,7 +5,9 @@ Combines enriched video collaboration data into a single message
 for real-time downstream consumption.
 """
 
-from pydantic import BaseModel, Field
+from datetime import UTC, datetime
+
+from pydantic import BaseModel, Field, field_serializer, field_validator
 
 
 class ClaimXVideoCollabEvent(BaseModel):
@@ -19,10 +21,11 @@ class ClaimXVideoCollabEvent(BaseModel):
     """
 
     # Event metadata
-    trace_id: str = Field(..., description="Correlation ID from source event")
+    trace_id: str = Field(..., description="Correlation ID from source event", min_length=1)
     event_type: str = Field(
         ...,
         description="VIDEO_COLLABORATION_INVITE_SENT or VIDEO_COLLABORATION_COMPLETED",
+        min_length=1,
     )
 
     # Identity fields
@@ -38,11 +41,30 @@ class ClaimXVideoCollabEvent(BaseModel):
     # Session metrics
     number_of_videos: int | None = Field(default=None, description="Number of videos captured")
     number_of_photos: int | None = Field(default=None, description="Number of photos captured")
-    total_time_seconds: str | None = Field(
-        default=None, description="Total session time in seconds (decimal string)"
+    total_time_seconds: float | None = Field(
+        default=None, description="Total session time in seconds"
     )
     session_count: int | None = Field(default=None, description="Number of sessions")
     total_time: str | None = Field(default=None, description="Total time formatted string")
+
+    # Timestamp for pipeline latency measurement
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        description="Timestamp when this event was created",
+    )
+
+    @field_validator("total_time_seconds", mode="before")
+    @classmethod
+    def coerce_total_time_seconds(cls, v):
+        """Accept string values for total_time_seconds (backward compatibility)."""
+        if isinstance(v, str):
+            return float(v)
+        return v
+
+    @field_serializer("created_at")
+    def serialize_timestamp(self, timestamp: datetime) -> str:
+        """Serialize datetime to ISO 8601 format."""
+        return timestamp.isoformat()
 
     model_config = {
         "json_schema_extra": {
@@ -57,7 +79,7 @@ class ClaimXVideoCollabEvent(BaseModel):
                     "policy_number": "POL-123456",
                     "number_of_videos": 3,
                     "number_of_photos": 12,
-                    "total_time_seconds": "1845.00",
+                    "total_time_seconds": 1845.00,
                     "session_count": 2,
                     "total_time": "0:30:45",
                 }

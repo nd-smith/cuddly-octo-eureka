@@ -378,6 +378,7 @@ class DownloadRetryHandler:
             project_id=task.project_id,
             download_url=task.download_url,
             original_task=task,
+            final_error=str(error)[:500],
             error_category=error_category.value,
             retry_count=task.retry_count,
             failed_at=datetime.now(UTC),

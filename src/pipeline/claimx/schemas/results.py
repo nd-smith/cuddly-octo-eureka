@@ -79,7 +79,7 @@ class ClaimXUploadResultMessage(BaseModel):
         default=0, description="Number of bytes uploaded (0 if failed)", ge=0
     )
     error_message: str | None = Field(
-        default=None, description="Error description if failed (truncated to 500 chars)"
+        default=None, description="Error description if failed (truncated to 500 chars)", max_length=500
     )
     created_at: datetime = Field(..., description="Timestamp when result was created")
 
@@ -182,7 +182,7 @@ class FailedEnrichmentMessage(BaseModel):
     final_error: str = Field(
         ..., description="Error message truncated to 500 chars", max_length=500
     )
-    error_category: str = Field(
+    error_category: Literal["transient", "permanent", "auth", "circuit_open", "unknown"] = Field(
         ...,
         description="Classification of error (transient, permanent, auth, circuit_open, unknown)",
     )
@@ -250,10 +250,12 @@ class FailedDownloadMessage(BaseModel):
     Contains only essential fields for replay capability.
 
     Attributes:
+        trace_id: Correlation ID from source event
         media_id: Media file identifier from ClaimX
         project_id: ClaimX project ID this media belongs to
         download_url: Original S3 presigned URL
         original_task: Complete original download task for replay capability
+        final_error: Error message truncated to 500 chars
         error_category: Classification of error (transient, permanent, auth, etc.)
         retry_count: Number of retry attempts before reaching DLQ
         failed_at: Timestamp when task was moved to DLQ
@@ -270,8 +272,11 @@ class FailedDownloadMessage(BaseModel):
     original_task: ClaimXDownloadTask = Field(
         ..., description="Complete original download task for replay capability"
     )
-    error_category: str = Field(
-        ..., description="Classification of error (transient, permanent, auth, etc.)"
+    final_error: str = Field(
+        ..., description="Error message truncated to 500 chars", max_length=500
+    )
+    error_category: Literal["transient", "permanent", "auth", "circuit_open", "unknown"] = Field(
+        ..., description="Classification of error (transient, permanent, auth, circuit_open, unknown)"
     )
     retry_count: int = Field(..., description="Number of retry attempts before reaching DLQ", ge=0)
     failed_at: datetime = Field(..., description="Timestamp when task was moved to DLQ")
@@ -297,7 +302,6 @@ class FailedDownloadMessage(BaseModel):
                     "media_id": "media_111",
                     "project_id": "proj_67890",
                     "download_url": "https://s3.amazonaws.com/claimx-media/presigned/photo.jpg?expired=1",
-                    "blob_path": "claimx/proj_67890/media/photo.jpg",
                     "original_task": {
                         "media_id": "media_111",
                         "project_id": "proj_67890",
@@ -312,7 +316,6 @@ class FailedDownloadMessage(BaseModel):
                     "final_error": "403 Forbidden: Presigned URL has expired",
                     "error_category": "transient",
                     "retry_count": 4,
-                    "url_refresh_attempted": True,
                     "failed_at": "2024-12-25T12:30:45Z",
                 },
                 {
@@ -320,7 +323,6 @@ class FailedDownloadMessage(BaseModel):
                     "media_id": "media_222",
                     "project_id": "proj_12345",
                     "download_url": "https://s3.amazonaws.com/claimx-media/missing.pdf",
-                    "blob_path": "claimx/proj_12345/media/document.pdf",
                     "original_task": {
                         "media_id": "media_222",
                         "project_id": "proj_12345",
@@ -335,7 +337,6 @@ class FailedDownloadMessage(BaseModel):
                     "final_error": "404 Not Found: Media file does not exist",
                     "error_category": "permanent",
                     "retry_count": 0,
-                    "url_refresh_attempted": False,
                     "failed_at": "2024-12-25T11:05:15Z",
                 },
             ]

@@ -401,7 +401,7 @@ def build_task_event(
         "loss_address_state_province": safe_str(address.get("stateProvince")),
         "loss_address_zip_postcode": safe_str(address.get("zipPostcode")),
         "mfn": _extract_mfn(project_response),
-        "task_assignment_id": safe_int(task_response.get("assignmentId")),
+        "task_assignment_id": safe_str_id(task_response.get("assignmentId")),
         "task_id": safe_int(task_response.get("taskId")),
         "form_id": safe_str(task_response.get("formId")),
         "task_name": safe_str(task_response.get("taskName")),
