@@ -29,7 +29,15 @@
         </div>
         <div class="form-group">
             <label>Start time (UTC)</label>
-            <input type="datetime-local" id="start-time">
+            <input type="datetime-local" id="start-time" step="1">
+            <div class="time-quick-btns">
+                <button type="button" onclick="setTimeOffset('start-time', 0)">Now</button>
+                <button type="button" onclick="setTimeOffset('start-time', 5)">-5m</button>
+                <button type="button" onclick="setTimeOffset('start-time', 10)">-10m</button>
+                <button type="button" onclick="setTimeOffset('start-time', 30)">-30m</button>
+                <button type="button" onclick="setTimeOffset('start-time', 60)">-1h</button>
+                <button type="button" onclick="setTimeOffset('start-time', 1440)">-24h</button>
+            </div>
         </div>
         <div class="form-group">
             <label>Count</label>
@@ -48,6 +56,13 @@
 </div>
 
 <script>
+    function setTimeOffset(inputId, minutesDelta) {
+        const el = document.getElementById(inputId);
+        const base = el.value ? new Date(el.value + 'Z').getTime() : Date.now();
+        const d = new Date(base - minutesDelta * 60000);
+        el.value = d.toISOString().slice(0, 19);
+    }
+
     let refreshTimer = null;
 
     function getParams() {

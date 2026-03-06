@@ -26,11 +26,25 @@
             </div>
             <div class="form-group">
                 <label>Start Time (UTC, required)</label>
-                <input type="datetime-local" name="start_time" required>
+                <input type="datetime-local" name="start_time" required step="1">
+                <div class="time-quick-btns">
+                    <button type="button" onclick="setTimeOffset(this.closest('.form-group').querySelector('input'), 5)">-5m</button>
+                    <button type="button" onclick="setTimeOffset(this.closest('.form-group').querySelector('input'), 10)">-10m</button>
+                    <button type="button" onclick="setTimeOffset(this.closest('.form-group').querySelector('input'), 30)">-30m</button>
+                    <button type="button" onclick="setTimeOffset(this.closest('.form-group').querySelector('input'), 60)">-1h</button>
+                    <button type="button" onclick="setTimeOffset(this.closest('.form-group').querySelector('input'), 1440)">-24h</button>
+                </div>
             </div>
             <div class="form-group">
                 <label>End Time (UTC, required)</label>
-                <input type="datetime-local" name="end_time" required>
+                <input type="datetime-local" name="end_time" required step="1">
+                <div class="time-quick-btns">
+                    <button type="button" onclick="setTimeOffset(this.closest('.form-group').querySelector('input'), 0)">Now</button>
+                    <button type="button" onclick="setTimeOffset(this.closest('.form-group').querySelector('input'), 5)">-5m</button>
+                    <button type="button" onclick="setTimeOffset(this.closest('.form-group').querySelector('input'), 10)">-10m</button>
+                    <button type="button" onclick="setTimeOffset(this.closest('.form-group').querySelector('input'), 30)">-30m</button>
+                    <button type="button" onclick="setTimeOffset(this.closest('.form-group').querySelector('input'), 60)">-1h</button>
+                </div>
             </div>
             <div class="form-group">
                 <label>Query</label>
@@ -50,4 +64,12 @@
 </div>
 
 <div id="search-results"></div>
+
+<script>
+    function setTimeOffset(input, minutesDelta) {
+        const base = input.value ? new Date(input.value + 'Z').getTime() : Date.now();
+        const d = new Date(base - minutesDelta * 60000);
+        input.value = d.toISOString().slice(0, 19);
+    }
+</script>
 {% endblock %}
