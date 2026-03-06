@@ -1,13 +1,16 @@
 """Checkpoint viewing, advancing, and time-based reset."""
 
 import asyncio
-import contextlib
 from dataclasses import dataclass, field
 from datetime import datetime
 
 from azure.eventhub import TransportType
 from azure.eventhub.aio import EventHubConsumerClient
 from azure.storage.blob import ContainerClient
+
+
+class _ReceiveComplete(Exception):
+    """Raised to break out of the EventHub receive loop."""
 
 
 @dataclass
@@ -174,9 +177,9 @@ async def _find_offsets_at_time(
                 nonlocal first_event
                 if event is not None and first_event is None:
                     first_event = event
-                    raise StopIteration
+                    raise _ReceiveComplete
 
-            with contextlib.suppress(StopIteration):
+            try:
                 await client.receive(
                     on_event=on_event,
                     partition_id=pid,
@@ -184,6 +187,8 @@ async def _find_offsets_at_time(
                     starting_position_inclusive=True,
                     max_wait_time=10,
                 )
+            except _ReceiveComplete:
+                pass
 
             if first_event:
                 results[pid] = {

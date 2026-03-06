@@ -1,6 +1,5 @@
 """Sample recent messages from an EventHub partition."""
 
-import contextlib
 import json
 from dataclasses import dataclass
 from datetime import datetime
@@ -8,6 +7,10 @@ from typing import Any
 
 from azure.eventhub import TransportType
 from azure.eventhub.aio import EventHubConsumerClient
+
+
+class _SamplingComplete(Exception):
+    """Raised to break out of the EventHub receive loop."""
 
 
 @dataclass
@@ -81,12 +84,12 @@ async def sample_messages(
 
         async def on_event(partition_context, event):
             if event is None:
-                raise StopIteration
+                raise _SamplingComplete
             received.append(event)
             if len(received) >= count:
-                raise StopIteration
+                raise _SamplingComplete
 
-        with contextlib.suppress(StopIteration):
+        try:
             await client.receive(
                 on_event=on_event,
                 partition_id=partition_id,
@@ -94,5 +97,7 @@ async def sample_messages(
                 starting_position_inclusive=inclusive,
                 max_wait_time=10,
             )
+        except _SamplingComplete:
+            pass
 
     return [_format_event(event) for event in received]
