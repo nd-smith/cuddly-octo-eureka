@@ -9,10 +9,6 @@ from azure.eventhub import TransportType
 from azure.eventhub.aio import EventHubConsumerClient
 
 
-class _SamplingComplete(Exception):
-    """Raised to break out of the EventHub receive loop."""
-
-
 @dataclass
 class SampledMessage:
     sequence_number: int
@@ -82,22 +78,19 @@ async def sample_messages(
 
         received = []
 
-        async def on_event(partition_context, event):
-            if event is None:
-                raise _SamplingComplete
-            received.append(event)
-            if len(received) >= count:
-                raise _SamplingComplete
-
-        try:
-            await client.receive(
-                on_event=on_event,
+        while len(received) < count:
+            batch = await client.receive_batch(
                 partition_id=partition_id,
+                max_batch_size=count - len(received),
+                max_wait_time=10,
                 starting_position=position,
                 starting_position_inclusive=inclusive,
-                max_wait_time=10,
             )
-        except _SamplingComplete:
-            pass
+            if not batch:
+                break
+            received.extend(batch)
+            # Advance position past last received event
+            position = received[-1].sequence_number
+            inclusive = False
 
-    return [_format_event(event) for event in received]
+    return [_format_event(event) for event in received[:count]]

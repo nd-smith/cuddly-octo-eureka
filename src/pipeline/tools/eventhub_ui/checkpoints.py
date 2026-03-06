@@ -9,10 +9,6 @@ from azure.eventhub.aio import EventHubConsumerClient
 from azure.storage.blob import ContainerClient
 
 
-class _ReceiveComplete(Exception):
-    """Raised to break out of the EventHub receive loop."""
-
-
 @dataclass
 class CheckpointEntry:
     partition_id: str
@@ -171,24 +167,14 @@ async def _find_offsets_at_time(
             if props["is_empty"]:
                 continue
 
-            first_event = None
-
-            async def on_event(partition_context, event):
-                nonlocal first_event
-                if event is not None and first_event is None:
-                    first_event = event
-                    raise _ReceiveComplete
-
-            try:
-                await client.receive(
-                    on_event=on_event,
-                    partition_id=pid,
-                    starting_position=target_time,
-                    starting_position_inclusive=True,
-                    max_wait_time=10,
-                )
-            except _ReceiveComplete:
-                pass
+            batch = await client.receive_batch(
+                partition_id=pid,
+                max_batch_size=1,
+                max_wait_time=10,
+                starting_position=target_time,
+                starting_position_inclusive=True,
+            )
+            first_event = batch[0] if batch else None
 
             if first_event:
                 results[pid] = {
