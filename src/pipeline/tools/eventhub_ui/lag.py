@@ -38,7 +38,14 @@ async def calculate_lag(
     # Fetch partition end offsets and blob checkpoints concurrently
     partition_infos, checkpoints = await asyncio.gather(
         get_partition_properties(conn_str, eventhub_name, ssl_kwargs),
-        asyncio.to_thread(_read_checkpoints, blob_conn_str, container_name, fqdn, eventhub_name, consumer_group),
+        asyncio.to_thread(
+            _read_checkpoints,
+            blob_conn_str,
+            container_name,
+            fqdn,
+            eventhub_name,
+            consumer_group,
+        ),
     )
 
     partition_lags = []
@@ -49,31 +56,37 @@ async def calculate_lag(
         cp = checkpoints.get(pinfo.partition_id)
         if cp is not None and not pinfo.is_empty:
             lag = max(0, pinfo.last_enqueued_sequence_number - cp["sequence"])
-            partition_lags.append(PartitionLag(
-                partition_id=pinfo.partition_id,
-                last_enqueued_sequence=pinfo.last_enqueued_sequence_number,
-                checkpointed_sequence=cp["sequence"],
-                lag=lag,
-                checkpointed_offset=cp["offset"],
-            ))
+            partition_lags.append(
+                PartitionLag(
+                    partition_id=pinfo.partition_id,
+                    last_enqueued_sequence=pinfo.last_enqueued_sequence_number,
+                    checkpointed_sequence=cp["sequence"],
+                    lag=lag,
+                    checkpointed_offset=cp["offset"],
+                )
+            )
             total_lag += lag
         elif pinfo.is_empty:
-            partition_lags.append(PartitionLag(
-                partition_id=pinfo.partition_id,
-                last_enqueued_sequence=pinfo.last_enqueued_sequence_number,
-                checkpointed_sequence=cp["sequence"] if cp else None,
-                lag=0,
-                checkpointed_offset=cp["offset"] if cp else None,
-            ))
+            partition_lags.append(
+                PartitionLag(
+                    partition_id=pinfo.partition_id,
+                    last_enqueued_sequence=pinfo.last_enqueued_sequence_number,
+                    checkpointed_sequence=cp["sequence"] if cp else None,
+                    lag=0,
+                    checkpointed_offset=cp["offset"] if cp else None,
+                )
+            )
         else:
             all_have_checkpoints = False
-            partition_lags.append(PartitionLag(
-                partition_id=pinfo.partition_id,
-                last_enqueued_sequence=pinfo.last_enqueued_sequence_number,
-                checkpointed_sequence=None,
-                lag=None,
-                checkpointed_offset=None,
-            ))
+            partition_lags.append(
+                PartitionLag(
+                    partition_id=pinfo.partition_id,
+                    last_enqueued_sequence=pinfo.last_enqueued_sequence_number,
+                    checkpointed_sequence=None,
+                    lag=None,
+                    checkpointed_offset=None,
+                )
+            )
 
     return ConsumerGroupLag(
         eventhub_name=eventhub_name,
@@ -92,13 +105,17 @@ def _read_checkpoints(
 ) -> dict[str, dict]:
     """Read checkpoint blob metadata. Returns {partition_id: {offset, sequence}}."""
     container_client = ContainerClient.from_connection_string(
-        blob_conn_str, container_name=container_name, connection_verify=False,
+        blob_conn_str,
+        container_name=container_name,
+        connection_verify=False,
     )
 
     prefix = f"{fqdn}/{eventhub_name}/{consumer_group}/checkpoint/"
     checkpoints = {}
 
-    for blob in container_client.list_blobs(name_starts_with=prefix, include=["metadata"]):
+    for blob in container_client.list_blobs(
+        name_starts_with=prefix, include=["metadata"]
+    ):
         partition_id = blob.name.rsplit("/", 1)[-1]
         metadata = blob.metadata or {}
         offset = metadata.get("offset")

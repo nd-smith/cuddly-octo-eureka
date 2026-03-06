@@ -3,7 +3,6 @@
 import os
 import re
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 
@@ -86,7 +85,7 @@ def extract_fqdn(conn_str: str) -> str:
     """Extract the namespace FQDN from a connection string."""
     match = re.search(r"Endpoint=sb://([^/;]+)", conn_str, re.IGNORECASE)
     if not match:
-        raise ValueError(f"Could not extract FQDN from connection string")
+        raise ValueError("Could not extract FQDN from connection string")
     return match.group(1)
 
 
@@ -114,15 +113,20 @@ def _extract_hubs(
             continue
         domain_name = f"{domain_prefix}{domain_key}" if domain_prefix else domain_key
         for topic_key, topic_config in domain_config.items():
-            if not isinstance(topic_config, dict) or "eventhub_name" not in topic_config:
+            if (
+                not isinstance(topic_config, dict)
+                or "eventhub_name" not in topic_config
+            ):
                 continue
-            hubs.append(EventHubInfo(
-                domain=domain_name,
-                topic_key=topic_key,
-                eventhub_name=topic_config["eventhub_name"],
-                consumer_groups=dict(topic_config.get("consumer_groups", {})),
-                is_source=is_source,
-            ))
+            hubs.append(
+                EventHubInfo(
+                    domain=domain_name,
+                    topic_key=topic_key,
+                    eventhub_name=topic_config["eventhub_name"],
+                    consumer_groups=dict(topic_config.get("consumer_groups", {})),
+                    is_source=is_source,
+                )
+            )
     return hubs
 
 
@@ -132,17 +136,25 @@ def list_eventhubs() -> list[EventHubInfo]:
 
     # Internal domains: verisk, claimx, plugins
     internal_skip = {
-        "namespace_connection_string", "transport_type",
-        "default_consumer_group", "checkpoint_store", "dedup_store", "source",
+        "namespace_connection_string",
+        "transport_type",
+        "default_consumer_group",
+        "checkpoint_store",
+        "dedup_store",
+        "source",
     }
     hubs = _extract_hubs(config, internal_skip)
 
     # Source domains: source.verisk, source.claimx
     source_config = config.get("source", {})
-    hubs.extend(_extract_hubs(
-        source_config, {"namespace_connection_string"},
-        domain_prefix="source.", is_source=True,
-    ))
+    hubs.extend(
+        _extract_hubs(
+            source_config,
+            {"namespace_connection_string"},
+            domain_prefix="source.",
+            is_source=True,
+        )
+    )
 
     return hubs
 
@@ -150,7 +162,8 @@ def list_eventhubs() -> list[EventHubInfo]:
 def _strip_entity_path(conn_str: str) -> str:
     """Remove EntityPath from a connection string if present."""
     parts = [
-        part for part in conn_str.split(";")
+        part
+        for part in conn_str.split(";")
         if part.strip() and not part.startswith("EntityPath=")
     ]
     return ";".join(parts)

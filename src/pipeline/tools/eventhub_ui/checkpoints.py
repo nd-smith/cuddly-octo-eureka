@@ -1,6 +1,7 @@
 """Checkpoint viewing, advancing, and time-based reset."""
 
 import asyncio
+import contextlib
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -38,22 +39,33 @@ def list_checkpoints(
 ) -> list[CheckpointEntry]:
     """List all checkpoint entries for a consumer group."""
     container_client = ContainerClient.from_connection_string(
-        blob_conn_str, container_name=container_name, connection_verify=False,
+        blob_conn_str,
+        container_name=container_name,
+        connection_verify=False,
     )
     prefix = f"{fqdn}/{eventhub_name}/{consumer_group}/checkpoint/"
     entries = []
 
-    for blob in container_client.list_blobs(name_starts_with=prefix, include=["metadata"]):
+    for blob in container_client.list_blobs(
+        name_starts_with=prefix, include=["metadata"]
+    ):
         partition_id = blob.name.rsplit("/", 1)[-1]
         metadata = blob.metadata or {}
         seq_str = metadata.get("sequencenumber")
-        entries.append(CheckpointEntry(
-            partition_id=partition_id,
-            offset=metadata.get("offset"),
-            sequence_number=int(seq_str) if seq_str else None,
-        ))
+        entries.append(
+            CheckpointEntry(
+                partition_id=partition_id,
+                offset=metadata.get("offset"),
+                sequence_number=int(seq_str) if seq_str else None,
+            )
+        )
 
-    return sorted(entries, key=lambda e: int(e.partition_id) if e.partition_id.isdigit() else e.partition_id)
+    return sorted(
+        entries,
+        key=lambda e: (
+            int(e.partition_id) if e.partition_id.isdigit() else e.partition_id
+        ),
+    )
 
 
 def advance_checkpoints_to_latest(
@@ -75,7 +87,12 @@ def advance_checkpoints_to_latest(
         loop.close()
 
     return _update_checkpoint_blobs(
-        blob_conn_str, container_name, fqdn, eventhub_name, consumer_group, offsets,
+        blob_conn_str,
+        container_name,
+        fqdn,
+        eventhub_name,
+        consumer_group,
+        offsets,
     )
 
 
@@ -85,17 +102,26 @@ async def reset_checkpoints_to_time(
 ) -> dict[str, dict]:
     """Reset checkpoints to a specific point in time. Returns {partition_id: {old, new}}."""
     offsets = await _find_offsets_at_time(
-        cfg.conn_str, cfg.eventhub_name, target_time, cfg.ssl_kwargs or None,
+        cfg.conn_str,
+        cfg.eventhub_name,
+        target_time,
+        cfg.ssl_kwargs or None,
     )
 
     return _update_checkpoint_blobs(
-        cfg.blob_conn_str, cfg.container_name, cfg.fqdn,
-        cfg.eventhub_name, cfg.consumer_group, offsets,
+        cfg.blob_conn_str,
+        cfg.container_name,
+        cfg.fqdn,
+        cfg.eventhub_name,
+        cfg.consumer_group,
+        offsets,
     )
 
 
 async def _get_latest_offsets(
-    conn_str: str, eventhub_name: str, ssl_kwargs: dict | None = None,
+    conn_str: str,
+    eventhub_name: str,
+    ssl_kwargs: dict | None = None,
 ) -> dict[str, dict]:
     """Get the latest offset/sequence for each partition."""
     client = EventHubConsumerClient.from_connection_string(
@@ -150,7 +176,7 @@ async def _find_offsets_at_time(
                     first_event = event
                     raise StopIteration
 
-            try:
+            with contextlib.suppress(StopIteration):
                 await client.receive(
                     on_event=on_event,
                     partition_id=pid,
@@ -158,8 +184,6 @@ async def _find_offsets_at_time(
                     starting_position_inclusive=True,
                     max_wait_time=10,
                 )
-            except StopIteration:
-                pass
 
             if first_event:
                 results[pid] = {
@@ -185,13 +209,17 @@ def _update_checkpoint_blobs(
 ) -> dict[str, dict]:
     """Write new checkpoint metadata to blob storage. Returns change details."""
     container_client = ContainerClient.from_connection_string(
-        blob_conn_str, container_name=container_name, connection_verify=False,
+        blob_conn_str,
+        container_name=container_name,
+        connection_verify=False,
     )
 
     prefix = f"{fqdn}/{eventhub_name}/{consumer_group}/checkpoint/"
     existing = {
         blob.name.rsplit("/", 1)[-1]: blob
-        for blob in container_client.list_blobs(name_starts_with=prefix, include=["metadata"])
+        for blob in container_client.list_blobs(
+            name_starts_with=prefix, include=["metadata"]
+        )
     }
 
     changes = {}

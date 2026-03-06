@@ -11,9 +11,7 @@ from pipeline.tools.eventhub_ui.lag import ConsumerGroupLag
 
 _lock = threading.Lock()
 
-DEFAULT_CSV_PATH = Path(
-    os.getenv("LAG_HISTORY_CSV", "/tmp/consumer_lag_history.csv")
-)
+DEFAULT_CSV_PATH = Path(os.getenv("LAG_HISTORY_CSV", "/tmp/consumer_lag_history.csv"))
 
 _HEADER = [
     "timestamp",
@@ -48,13 +46,15 @@ def record_snapshot(
             writer = csv.writer(f)
             for r in results:
                 lag: ConsumerGroupLag = r["lag"]
-                writer.writerow([
-                    now,
-                    lag.eventhub_name,
-                    lag.consumer_group,
-                    lag.total_lag if lag.total_lag is not None else "",
-                    len(lag.partitions),
-                ])
+                writer.writerow(
+                    [
+                        now,
+                        lag.eventhub_name,
+                        lag.consumer_group,
+                        lag.total_lag if lag.total_lag is not None else "",
+                        len(lag.partitions),
+                    ]
+                )
 
 
 def get_trends(
@@ -70,10 +70,9 @@ def get_trends(
         return {}
 
     # Read all rows (CSV is append-only, so order = chronological)
-    with _lock:
-        with open(path, newline="") as f:
-            reader = csv.DictReader(f)
-            rows = list(reader)
+    with _lock, open(path, newline="") as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
 
     # Group by (eventhub, consumer_group), keep last N
     from collections import defaultdict

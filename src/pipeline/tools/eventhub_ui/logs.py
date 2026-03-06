@@ -35,9 +35,7 @@ def get_onelake_log_path() -> str:
         if path:
             return path
 
-    raise ValueError(
-        "No OneLake log path configured. Set ONELAKE_LOG_PATH."
-    )
+    raise ValueError("No OneLake log path configured. Set ONELAKE_LOG_PATH.")
 
 
 def _get_client() -> OneLakeClient:
@@ -48,11 +46,7 @@ def list_log_domains() -> list[str]:
     """List available domain directories under logs/."""
     client = _get_client()
     entries = client.list_directory("logs")
-    return sorted(
-        e["name"].split("/")[-1]
-        for e in entries
-        if e["is_directory"]
-    )
+    return sorted(e["name"].split("/")[-1] for e in entries if e["is_directory"])
 
 
 def list_log_dates(domain: str) -> list[str]:

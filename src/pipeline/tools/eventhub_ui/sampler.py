@@ -1,6 +1,6 @@
 """Sample recent messages from an EventHub partition."""
 
-import asyncio
+import contextlib
 import json
 from dataclasses import dataclass
 from datetime import datetime
@@ -86,7 +86,7 @@ async def sample_messages(
             if len(received) >= count:
                 raise StopIteration
 
-        try:
+        with contextlib.suppress(StopIteration):
             await client.receive(
                 on_event=on_event,
                 partition_id=partition_id,
@@ -94,7 +94,5 @@ async def sample_messages(
                 starting_position_inclusive=inclusive,
                 max_wait_time=10,
             )
-        except StopIteration:
-            pass
 
     return [_format_event(event) for event in received]

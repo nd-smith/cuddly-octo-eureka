@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
 
 from azure.eventhub import TransportType
 from azure.eventhub.aio import EventHubConsumerClient
@@ -27,7 +26,9 @@ class EventHubProperties:
 
 
 async def get_eventhub_properties(
-    conn_str: str, eventhub_name: str, ssl_kwargs: dict | None = None,
+    conn_str: str,
+    eventhub_name: str,
+    ssl_kwargs: dict | None = None,
 ) -> EventHubProperties:
     """Get high-level EventHub properties (partition count, etc.)."""
     client = EventHubConsumerClient.from_connection_string(
@@ -48,7 +49,9 @@ async def get_eventhub_properties(
 
 
 async def get_partition_properties(
-    conn_str: str, eventhub_name: str, ssl_kwargs: dict | None = None,
+    conn_str: str,
+    eventhub_name: str,
+    ssl_kwargs: dict | None = None,
 ) -> list[PartitionInfo]:
     """Get per-partition properties for an EventHub."""
     client = EventHubConsumerClient.from_connection_string(
@@ -63,12 +66,16 @@ async def get_partition_properties(
         partition_ids = await client.get_partition_ids()
         for pid in sorted(partition_ids, key=int):
             props = await client.get_partition_properties(pid)
-            partitions.append(PartitionInfo(
-                partition_id=pid,
-                beginning_sequence_number=props["beginning_sequence_number"],
-                last_enqueued_sequence_number=props["last_enqueued_sequence_number"],
-                last_enqueued_offset=str(props["last_enqueued_offset"]),
-                last_enqueued_time_utc=props.get("last_enqueued_time_utc"),
-                is_empty=props["is_empty"],
-            ))
+            partitions.append(
+                PartitionInfo(
+                    partition_id=pid,
+                    beginning_sequence_number=props["beginning_sequence_number"],
+                    last_enqueued_sequence_number=props[
+                        "last_enqueued_sequence_number"
+                    ],
+                    last_enqueued_offset=str(props["last_enqueued_offset"]),
+                    last_enqueued_time_utc=props.get("last_enqueued_time_utc"),
+                    is_empty=props["is_empty"],
+                )
+            )
     return partitions

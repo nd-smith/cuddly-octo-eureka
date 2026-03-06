@@ -95,6 +95,7 @@ def expand_env_var_string(value: str) -> str:
     If a variable has no default and is not set, the original ${VAR}
     reference is left in place (to be caught by validation).
     """
+
     def replacer(match):
         var_name = match.group(1)
         default_value = match.group(2) if match.group(2) is not None else match.group(0)
@@ -161,9 +162,7 @@ class MessageConfig:
     temp_dir: str = field(
         default_factory=lambda: str(Path(tempfile.gettempdir()) / "pipeline_temp")
     )
-    retry_persistence_dir: str = field(
-        default_factory=lambda: tempfile.gettempdir()
-    )
+    retry_persistence_dir: str = field(default_factory=lambda: tempfile.gettempdir())
 
     # =========================================================================
     # CLAIMX API CONFIGURATION
@@ -304,10 +303,15 @@ def load_config(
         claimx=claimx_config,
         onelake_base_path=storage.get("onelake_base_path", ""),
         onelake_domain_paths=storage.get("onelake_domain_paths", {}),
-        cache_dir=storage.get("cache_dir") or str(Path(tempfile.gettempdir()) / "pipeline_cache"),
-        temp_dir=storage.get("temp_dir") or str(Path(tempfile.gettempdir()) / "pipeline_temp"),
-        retry_persistence_dir=storage.get("retry_persistence_dir") or tempfile.gettempdir(),
-        claimx_api_url=get_config_value("CLAIMX_API_URL", claimx_api.get("base_url", "")),
+        cache_dir=storage.get("cache_dir")
+        or str(Path(tempfile.gettempdir()) / "pipeline_cache"),
+        temp_dir=storage.get("temp_dir")
+        or str(Path(tempfile.gettempdir()) / "pipeline_temp"),
+        retry_persistence_dir=storage.get("retry_persistence_dir")
+        or tempfile.gettempdir(),
+        claimx_api_url=get_config_value(
+            "CLAIMX_API_URL", claimx_api.get("base_url", "")
+        ),
         claimx_api_token=claimx_api_token,
         claimx_api_timeout_seconds=int(
             get_config_value(
@@ -315,7 +319,9 @@ def load_config(
             )
         ),
         claimx_api_concurrency=int(
-            get_config_value("CLAIMX_API_CONCURRENCY", str(claimx_api.get("max_concurrent", 20)))
+            get_config_value(
+                "CLAIMX_API_CONCURRENCY", str(claimx_api.get("max_concurrent", 20))
+            )
         ),
         logging_config=logging_config,
     )
@@ -421,7 +427,9 @@ def _configure_cli_logging(verbose: bool) -> None:
     )
 
 
-def _build_validation_output(config: MessageConfig, json_output: bool) -> dict[str, Any]:
+def _build_validation_output(
+    config: MessageConfig, json_output: bool
+) -> dict[str, Any]:
     """Build validation output and print human-readable summary if needed."""
     if json_output:
         return {
@@ -441,7 +449,9 @@ def _build_validation_output(config: MessageConfig, json_output: bool) -> dict[s
     return {}
 
 
-def _build_merged_config_output(config_dict: dict[str, Any], json_output: bool) -> dict[str, Any]:
+def _build_merged_config_output(
+    config_dict: dict[str, Any], json_output: bool
+) -> dict[str, Any]:
     """Build merged config output and print human-readable view if needed."""
     if json_output:
         return {"merged_config": config_dict}
@@ -453,7 +463,9 @@ def _build_merged_config_output(config_dict: dict[str, Any], json_output: bool) 
     return {}
 
 
-def _handle_cli_error(error: Exception, json_output: bool, verbose: bool, label: str = "Error") -> None:
+def _handle_cli_error(
+    error: Exception, json_output: bool, verbose: bool, label: str = "Error"
+) -> None:
     if json_output:
         print(json.dumps({"error": str(error)}))
         return

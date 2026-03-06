@@ -110,7 +110,9 @@ class EventHubConfig:
                 "events": self.events_topic,
             },
             "consumer_group_prefix": (
-                self.consumer_group.rsplit("-", 1)[0] if "-" in self.consumer_group else "verisk"
+                self.consumer_group.rsplit("-", 1)[0]
+                if "-" in self.consumer_group
+                else "verisk"
             ),
             "event_ingester": {
                 "consumer": {
