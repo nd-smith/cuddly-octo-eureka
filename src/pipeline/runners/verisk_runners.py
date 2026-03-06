@@ -163,11 +163,7 @@ async def run_result_processor(
 ):
     """Reads download results and writes to Delta Lake tables.
     On Delta write failure, batches are routed to retry topics."""
-    from core.logging.context import set_log_context
     from pipeline.verisk.workers.result_processor import ResultProcessor
-
-    set_log_context(stage="xact-result-processor")
-    logger.info("Starting xact Result Processor worker...")
 
     if enable_delta_writes and not inventory_table_path:
         logger.error(

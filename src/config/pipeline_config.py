@@ -11,47 +11,16 @@ Workers:
     - ResultProcessor: Reads from EventHub
 """
 
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from config.config import MessageConfig, expand_env_var_string
+from config.config import DEFAULT_CONFIG_FILE, MessageConfig
+from config.config import get_config_value as _get_config_value
 
-# Default config file: config/config.yaml in src/ directory
-DEFAULT_CONFIG_FILE = Path(__file__).parent.parent / "config" / "config.yaml"
-
-
-def _get_config_value(env_var: str, yaml_value: str, default: str = "") -> str:
-    """
-    Get config value from env var or yaml or default.
-
-    Expands environment variables in yaml_value if present (e.g., ${VAR_NAME}).
-    If expansion fails (env var not set), the literal ${VAR} string remains.
-    """
-    value = os.getenv(env_var)
-    if value:
-        return value
-
-    # Expand environment variables in yaml_value
-    # This handles cases like "events_table_path: ${CLAIMX_DELTA_EVENTS_TABLE}"
-    result = yaml_value or default
-    if result:
-        expanded = expand_env_var_string(result)
-
-        # Warn if expansion failed (still contains ${...})
-        if "${" in expanded and "}" in expanded:
-            import logging
-
-            logger = logging.getLogger(__name__)
-            logger.warning(
-                f"Config value contains unexpanded environment variable: {expanded}. "
-                f"Ensure the environment variable is set before starting the worker."
-            )
-
-        result = expanded
-
-    return result
+logger = logging.getLogger(__name__)
 
 
 def _parse_bool_env(env_var: str, yaml_value: Any) -> bool:
@@ -67,23 +36,12 @@ def _parse_bool_env(env_var: str, yaml_value: Any) -> bool:
 
 
 def _load_config_data(config_path: Path) -> dict[str, Any]:
-    """Load configuration data from config.yaml file.
-
-    Args:
-        config_path: Path to config.yaml file
-
-    Returns:
-        Configuration dictionary
-
-    Raises:
-        FileNotFoundError: If config file doesn't exist
-    """
+    """Load and expand env vars in config.yaml. Raises FileNotFoundError if missing."""
     if not config_path.exists():
         raise FileNotFoundError(
             f"Configuration file not found: {config_path}\nExpected file: config/config.yaml"
         )
 
-    # Load from single file
     from config.config import _expand_env_vars, load_yaml
 
     config_data = load_yaml(config_path)
@@ -119,18 +77,12 @@ class EventHubConfig:
 
     @classmethod
     def from_env(cls) -> "EventHubConfig":
-        """Load Event Hub configuration from environment variables.
+        """Load from environment variables.
 
         Required (at least one):
-            EVENTHUB_NAMESPACE_CONNECTION_STRING: Namespace-level connection string (preferred)
-            EVENTHUB_CONNECTION_STRING: Full connection string (backward compat)
-
-        Optional (legacy, for Kafka protocol):
-            EVENTHUB_BOOTSTRAP_SERVERS: Event Hub namespace bootstrap servers
-            EVENTHUB_EVENTS_TOPIC: Topic name
-            EVENTHUB_CONSUMER_GROUP: Consumer group
+            EVENTHUB_NAMESPACE_CONNECTION_STRING (preferred)
+            EVENTHUB_CONNECTION_STRING (backward compat)
         """
-        # Prefer namespace connection string, fall back to legacy
         namespace_conn = os.getenv("EVENTHUB_NAMESPACE_CONNECTION_STRING", "")
         legacy_conn = os.getenv("EVENTHUB_CONNECTION_STRING", "")
         bootstrap_servers = os.getenv("EVENTHUB_BOOTSTRAP_SERVERS", "")
@@ -152,12 +104,7 @@ class EventHubConfig:
         )
 
     def to_message_config(self) -> MessageConfig:
-        """Convert to MessageConfig for use with MessageConsumer.
-
-        Creates a hierarchical MessageConfig matching the new config.yaml structure.
-        Used only when Kafka protocol is needed (not AMQP transport).
-        """
-        # Build verisk domain config for Event Hub source
+        """Convert to MessageConfig for Kafka-protocol consumers."""
         verisk_config = {
             "topics": {
                 "events": self.events_topic,
@@ -179,36 +126,21 @@ class EventHubConfig:
         )
 
 
-# =============================================================================
-# Local Kafka transport removed - EventHub is primary
-# =============================================================================
-# Internal pipeline communication uses EventHub (primary) via AMQP transport.
-# Kafka protocol support remains available for local development via MessageConfig.
-# Domain-specific settings (topics, retry, storage) remain in MessageConfig.
-# =============================================================================
-
-
 @dataclass
 class PipelineConfig:
-    """Complete pipeline configuration.
+    """Complete pipeline configuration (EventHub + Delta Lake paths)."""
 
-    EventHub is the sole event source. Kafka has been removed.
-    """
-
-    # Event Hub config
     eventhub: EventHubConfig | None = None
+    domain: str = "verisk"  # OneLake routing domain ("verisk" or "claimx")
 
-    # Domain identifier for OneLake routing (e.g., "verisk", "claimx")
-    domain: str = "verisk"
-
-    # Delta Lake configuration
+    # Verisk Delta table paths
     enable_delta_writes: bool = True
     events_table_path: str = ""
     inventory_table_path: str = ""
-    failed_table_path: str = ""  # Optional: for tracking permanent failures
+    failed_table_path: str = ""
 
     # ClaimX Delta table paths
-    claimx_events_table_path: str = ""  # ClaimX events Delta table
+    claimx_events_table_path: str = ""
     claimx_projects_table_path: str = ""
     claimx_contacts_table_path: str = ""
     claimx_inventory_table_path: str = ""
@@ -220,32 +152,20 @@ class PipelineConfig:
 
     @classmethod
     def load_config(cls, config_path: Path | None = None) -> "PipelineConfig":
-        """Load complete pipeline configuration from config directory and environment.
-
-        Configuration priority (highest to lowest):
-        1. Environment variables
-        2. Config files in config/ directory
-        3. Dataclass defaults
-        """
-        # Use default config directory if not specified
+        """Load config. Priority: env vars > config.yaml > dataclass defaults."""
         resolved_path = config_path or DEFAULT_CONFIG_FILE
-
-        # Load configuration data from config directory
         yaml_data = _load_config_data(resolved_path)
 
         eventhub_config = EventHubConfig.from_env()
 
-        # Load delta configuration from yaml with env var override
         delta_config = yaml_data.get("delta", {})
         domain = os.getenv("PIPELINE_DOMAIN", "verisk")
         domain_delta_config = delta_config.get(domain, {})
 
         # Enable delta writes: env var > yaml > default True
-        enable_delta_writes_str = os.getenv("ENABLE_DELTA_WRITES")
-        if enable_delta_writes_str is not None:
-            enable_delta_writes = enable_delta_writes_str.lower() == "true"
-        else:
-            enable_delta_writes = delta_config.get("enable_writes", True)
+        enable_delta_writes = _parse_bool_env(
+            "ENABLE_DELTA_WRITES", delta_config.get("enable_writes", True)
+        )
 
         return cls(
             eventhub=eventhub_config,
@@ -303,8 +223,5 @@ class PipelineConfig:
 
 
 def get_pipeline_config(config_path: Path | None = None) -> PipelineConfig:
-    """Get pipeline configuration from config directory and environment.
-
-    This is the main entry point for loading configuration.
-    """
+    """Load pipeline configuration from config.yaml and environment."""
     return PipelineConfig.load_config(config_path)

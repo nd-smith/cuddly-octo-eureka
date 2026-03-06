@@ -16,7 +16,6 @@ from typing import Any, TypedDict
 
 import yaml
 
-# Configure module logger
 logger = logging.getLogger(__name__)
 
 
@@ -63,11 +62,27 @@ def load_yaml(path: Path) -> dict[str, Any]:
 
 
 def get_config_value(env_var: str, yaml_value: str, default: str = "") -> str:
-    """Get config value from env var or yaml or default."""
+    """Get config value from env var or yaml or default.
+
+    Expands ${VAR} and ${VAR:-default} syntax in yaml_value.
+    Warns if expansion leaves unresolved variables.
+    """
     value = os.getenv(env_var)
     if value:
         return value
-    return yaml_value or default
+
+    result = yaml_value or default
+    if result:
+        expanded = expand_env_var_string(result)
+        if "${" in expanded and "}" in expanded:
+            logger.warning(
+                "Config value contains unexpanded environment variable: %s. "
+                "Ensure the environment variable is set before starting the worker.",
+                expanded,
+            )
+        result = expanded
+
+    return result
 
 
 _ENV_VAR_PATTERN = re.compile(r"\$\{([^}:]+)(?::-(([^}]*))?)?\}")
@@ -100,8 +115,7 @@ def _expand_env_vars(data: Any) -> Any:
         return data
 
 
-# Default config file: config/config.yaml in src/ directory
-DEFAULT_CONFIG_FILE = Path(__file__).parent.parent / "config" / "config.yaml"
+DEFAULT_CONFIG_FILE = Path(__file__).parent / "config.yaml"
 
 
 @dataclass
@@ -162,7 +176,7 @@ class MessageConfig:
     # =========================================================================
     # LOGGING CONFIGURATION
     # =========================================================================
-    logging_config: LoggingConfig = field(default_factory=dict)
+    logging_config: dict[str, Any] = field(default_factory=dict)
 
     def _get_domain_config(self, domain: str) -> dict[str, Any]:
         """Get domain config by name.
@@ -174,15 +188,10 @@ class MessageConfig:
             return self.verisk
         if domain == "claimx":
             return self.claimx
-        # Return empty dict for unknown domains (e.g., plugin workers)
         return {}
 
     def get_topic(self, domain: str, topic_key: str) -> str:
-        """Get topic name for domain/topic_key.
-
-        Returns a formatted topic name string in the format "domain.topic_key".
-        Used by the dummy data source for testing.
-        """
+        """Get topic name as "domain.topic_key"."""
         return f"{domain}.{topic_key}"
 
     def get_consumer_group(self, domain: str, worker_name: str) -> str:
@@ -228,9 +237,6 @@ class MessageConfig:
             raise ValueError(f"{field_name} missing hostname: {url}")
 
     def _validate_directories(self) -> None:
-        import os
-        from pathlib import Path
-
         if self.cache_dir:
             cache_path = Path(self.cache_dir)
             if cache_path.exists() and not os.access(cache_path, os.W_OK):
@@ -252,12 +258,7 @@ def load_config(
     config_path: Path | None = None,
     overrides: dict[str, Any] | None = None,
 ) -> MessageConfig:
-    """Load message pipeline configuration from config.yaml file.
-
-    Loads from single consolidated config/config.yaml file with all settings.
-
-    Environment variables ARE supported using ${VAR_NAME} syntax in YAML files.
-    """
+    """Load pipeline configuration from config.yaml, expanding ${VAR} env var syntax."""
     if config_path is None:
         config_path = DEFAULT_CONFIG_FILE
 
@@ -503,10 +504,7 @@ def _cli_main() -> int:
     except ValueError as e:
         _handle_cli_error(e, args.json, args.verbose, label="Validation error")
     except Exception as e:
-        if args.json:
-            print(json.dumps({"error": f"Unexpected error: {e}"}))
-        else:
-            _handle_cli_error(e, args.json, args.verbose, label="Unexpected error")
+        _handle_cli_error(e, args.json, args.verbose, label="Unexpected error")
     return 1
 
 

@@ -24,19 +24,15 @@ from core.logging.utilities import get_log_output_mode
 from pipeline.common.health import HealthCheckServer
 from pipeline.runners.registry import WORKER_REGISTRY, run_worker_from_registry
 
-# Project root directory (where .env file is located)
-# __main__.py is at src/pipeline/__main__.py, so root is 3 levels up
+# src/pipeline/__main__.py → root is 3 levels up
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 
-# Worker stages for multi-worker logging
 WORKER_STAGES = list(WORKER_REGISTRY.keys())
 
-# Placeholder logger until setup_logging() is called in main()
-# This allows module-level logging before full initialization
+# Re-assigned after setup_logging() in main() to pick up configured handlers
 logger = logging.getLogger(__name__)
 
-# Global shutdown event for graceful batch completion
-# Set by signal handlers, checked by workers to finish current batch before exiting
+# Set by signal handlers; workers check this to finish current batch before exiting
 _shutdown_event: asyncio.Event | None = None
 
 
@@ -85,16 +81,7 @@ async def run_error_mode(worker_name: str, error_msg: str) -> None:
 
 
 def enter_error_mode(loop: asyncio.AbstractEventLoop, worker_name: str, error_msg: str) -> None:
-    """Enter error mode with health server running until shutdown.
-
-    Fallback error mode for cases where worker health server doesn't exist:
-    - Configuration errors (before worker creation)
-    - Worker instantiation errors (before health server initialized)
-    - Workers without health servers (will reach here via runner re-raise)
-
-    Most workers now handle their own error mode via runners/common.py, so
-    this primarily handles pre-worker and configuration errors.
-    """
+    """Sync wrapper for run_error_mode — keeps health server alive until shutdown."""
     logger.warning("Entering ERROR MODE - health endpoint will remain alive")
     try:
         loop.run_until_complete(run_error_mode(worker_name, error_msg))
@@ -150,9 +137,8 @@ async def run_worker_pool(
 
     tasks = []
     for i in range(count):
-        instance_id = str(i)
+        instance_id = i
 
-        # Pass instance_id to worker for distinct logging and Kafka client_id
         instance_kwargs = kwargs.copy()
         instance_kwargs["instance_id"] = instance_id
 
@@ -316,7 +302,7 @@ async def run_all_workers(
     pipeline_config,
     enable_delta_writes: bool = True,
 ):
-    """Run all pipeline wcoorkers concurrently.
+    """Run all pipeline workers concurrently.
     Architecture: events.raw → EventIngester → downloads.pending → DownloadWorker → ...
                   events.raw → DeltaEventsWorker → Delta table (parallel)"""
     from config import get_config
@@ -363,7 +349,6 @@ def start_metrics_server(preferred_port: int) -> int:
     Returns actual port number that the server is listening on."""
     import socket
 
-    # Try to get custom registry from telemetry, fallback to default
     try:
         from pipeline.common.telemetry import get_prometheus_registry
 
@@ -607,8 +592,7 @@ def _initialize_infrastructure(args, domain):
     asyncio.set_event_loop(loop)
     setup_signal_handlers(loop)
 
-    # Start health server FIRST, before any other initialization
-    # This ensures the health endpoint is available immediately for Kubernetes probes
+    # Health server must start before anything else so K8s probes pass during init
     print("[STARTUP] Initializing health server (first priority)...", flush=True)
     early_health_server = HealthCheckServer(
         port=8080,
@@ -626,7 +610,6 @@ def _initialize_infrastructure(args, domain):
         extra={"port": early_health_server.actual_port, "worker": args.worker},
     )
 
-    # Verify persistent storage permissions
     verify_storage_permissions(Path("/mnt/pcesdopodapp"))
 
     _debug_token_file = os.getenv("AZURE_TOKEN_FILE")
@@ -650,7 +633,7 @@ def _initialize_infrastructure(args, domain):
                 },
             )
 
-    # Initialize telemetry before starting metrics server so metrics are registered
+    # Telemetry must init before metrics server so Prometheus collectors are registered
     from pipeline.common.telemetry import initialize_telemetry
 
     worker_name = args.worker if args.worker != "all" else "all-workers"
@@ -687,9 +670,7 @@ def _load_pipeline_config(args, loop, early_health_server):
         logger.exception("Configuration error", extra={"error": error_msg})
         logger.error("Use --dev flag for local development")
 
-        # Set error on early health server and wait for shutdown
         early_health_server.set_error(f"Configuration error: {error_msg}")
-        logger.info("Health server set to error state, waiting for shutdown...")
         shutdown_event = get_shutdown_event()
         loop.run_until_complete(shutdown_event.wait())
         loop.run_until_complete(early_health_server.stop())
@@ -760,31 +741,23 @@ def main():
     except asyncio.CancelledError:
         logger.info("Tasks cancelled, shutting down...")
     except Exception as e:
-        # Fatal error handling
-        # Note: Workers with health servers handle their own error mode in
-        # runners/common.py and won't reach here. This catches:
-        # - Worker instantiation errors (before health server exists)
-        # - Errors from workers without health servers
-        # - Errors from run_all_workers orchestration
+        # Workers with health servers handle their own error mode in runners/common.py.
+        # This catches pre-worker errors, workers without health servers, and
+        # orchestration errors from run_all_workers.
         error_msg = str(e)
         logger.error("Fatal error", extra={"error": error_msg})
-
-        # Set error on early health server and wait for shutdown
         early_health_server.set_error(f"Fatal error: {error_msg}")
-        logger.info("Early health server set to error state, waiting for shutdown...")
         loop.run_until_complete(asyncio.to_thread(upload_crash_logs, error_msg))
         loop.run_until_complete(shutdown_event.wait())
     finally:
-        # Cancel any remaining async tasks to trigger their cleanup handlers
         pending = asyncio.all_tasks(loop)
         for task in pending:
             task.cancel()
         if pending:
             loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-            # Allow time for aiohttp sessions to close after task cancellation
+            # Grace period for aiohttp connector cleanup after cancellation
             loop.run_until_complete(asyncio.sleep(0.250))
 
-        # Stop early health server
         print("[SHUTDOWN] Stopping early health server...", flush=True)
         loop.run_until_complete(early_health_server.stop())
         loop.close()

@@ -104,13 +104,18 @@ async def _enter_worker_error_mode(
     """
     logger.warning(f"Entering ERROR MODE for {stage_name} - health endpoint will remain alive")
 
-    # Set error state on existing health server
     health_server.set_error(error_msg)
 
-    # Upload crash logs in background (non-blocking)
-    # Track the task so it doesn't produce "Task was destroyed" warnings on shutdown
+    # Hold a reference to prevent "Task was destroyed" warnings on shutdown
     crash_log_task = asyncio.create_task(asyncio.to_thread(upload_crash_logs, error_msg))
-    crash_log_task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
+
+    def _log_crash_upload_error(t: asyncio.Task) -> None:
+        if not t.cancelled():
+            exc = t.exception()
+            if exc:
+                logger.warning("Crash log upload failed", extra={"error": str(exc)})
+
+    crash_log_task.add_done_callback(_log_crash_upload_error)
 
     logger.info(
         "Health server running in error mode",
@@ -121,7 +126,6 @@ async def _enter_worker_error_mode(
         },
     )
 
-    # Wait for shutdown signal
     await shutdown_event.wait()
     logger.info(f"Shutdown signal received in error mode for {stage_name}")
 
@@ -144,7 +148,6 @@ async def execute_worker_with_shutdown(
         shutdown_event: Event to signal graceful shutdown
         instance_id: Instance identifier for multi-instance deployments (optional)
     """
-    # Set log context with instance_id if provided
     context = {"stage": stage_name}
     if instance_id is not None:
         context["instance_id"] = instance_id
@@ -166,7 +169,6 @@ async def execute_worker_with_shutdown(
     try:
         await _start_with_retry(worker_instance.start, stage_name)
     except Exception as e:
-        # If worker has health server, enter error mode to keep it alive
         if hasattr(worker_instance, "health_server"):
             await _cleanup_watcher_task(watcher_task)
             await _enter_worker_error_mode(
@@ -177,7 +179,6 @@ async def execute_worker_with_shutdown(
             )
             # Fall through to finally for cleanup
         else:
-            # No health server - re-raise for top-level error mode
             raise
     finally:
         await _cleanup_watcher_task(watcher_task)
@@ -214,7 +215,6 @@ async def execute_worker_with_producer(
         producer_worker_name: Name for producer (defaults to stage_name)
         instance_id: Instance identifier for multi-instance deployments (optional)
     """
-    # Set log context with instance_id if provided
     context = {"stage": stage_name}
     if instance_id is not None:
         context["instance_id"] = instance_id
@@ -229,12 +229,10 @@ async def execute_worker_with_producer(
     worker_kwargs = worker_kwargs or {}
     producer_worker_name = producer_worker_name or stage_name.replace("-", "_")
 
-    # Add instance_id to producer and worker if provided
     if instance_id is not None:
         producer_worker_name = f"{producer_worker_name}_{instance_id}"
         worker_kwargs["instance_id"] = instance_id
 
-    # Use transport factory to create producer (Event Hub or Kafka)
     from pipeline.common.transport import create_producer
 
     producer = create_producer(
@@ -245,26 +243,30 @@ async def execute_worker_with_producer(
     )
     await _start_with_retry(producer.start, f"{stage_name}-producer")
 
-    worker = worker_class(
-        config=kafka_config,
-        producer=producer,
-        domain=domain,
-        **worker_kwargs,
-    )
-
-    async def shutdown_watcher():
-        await shutdown_event.wait()
-        logger.info(f"Shutdown signal received, stopping {stage_name}{logger_suffix}...")
-        await worker.stop()
-
-    watcher_task = asyncio.create_task(shutdown_watcher())
+    worker = None
+    watcher_task = None
 
     try:
+        worker = worker_class(
+            config=kafka_config,
+            producer=producer,
+            domain=domain,
+            **worker_kwargs,
+        )
+
+        async def shutdown_watcher():
+            await shutdown_event.wait()
+            logger.info(f"Shutdown signal received, stopping {stage_name}{logger_suffix}...")
+            await worker.stop()
+
+        watcher_task = asyncio.create_task(shutdown_watcher())
+
         await _start_with_retry(worker.start, stage_name)
     except Exception as e:
-        # If worker has health server, enter error mode to keep it alive
-        if hasattr(worker, "health_server"):
-            await _cleanup_watcher_task(watcher_task)
+        if worker is not None and hasattr(worker, "health_server"):
+            if watcher_task is not None:
+                await _cleanup_watcher_task(watcher_task)
+                watcher_task = None
             await _enter_worker_error_mode(
                 worker.health_server,
                 stage_name,
@@ -273,14 +275,15 @@ async def execute_worker_with_producer(
             )
             # Fall through to finally for cleanup
         else:
-            # No health server - re-raise for top-level error mode
             raise
     finally:
-        await _cleanup_watcher_task(watcher_task)
-        try:
-            await worker.stop()
-        except Exception as e:
-            logger.error("Error stopping worker", extra={"error": str(e), "stage": stage_name})
+        if watcher_task is not None:
+            await _cleanup_watcher_task(watcher_task)
+        if worker is not None:
+            try:
+                await worker.stop()
+            except Exception as e:
+                logger.error("Error stopping worker", extra={"error": str(e), "stage": stage_name})
         try:
             await producer.stop()
         except Exception as e:

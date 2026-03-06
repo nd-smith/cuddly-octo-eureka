@@ -1,9 +1,4 @@
-"""Worker registry for mapping CLI worker names to runner functions.
-
-This registry defines all available workers and how to execute them.
-Each worker entry specifies:
-- runner: The async function to execute
-"""
+"""Worker registry: maps CLI worker names to runner functions."""
 
 import asyncio
 import inspect
@@ -11,7 +6,6 @@ from typing import Any
 
 from pipeline.runners import claimx_runners, plugin_runners, verisk_runners
 
-# Worker registry mapping worker names to their runner functions and config builders
 WORKER_REGISTRY: dict[str, dict[str, Any]] = {
     # XACT workers
     "xact-event-ingester": {
@@ -80,6 +74,9 @@ def _get_worker_table_paths(worker_name: str, pipeline_config) -> dict[str, str]
             "inventory_table_path": pipeline_config.inventory_table_path,
             "failed_table_path": pipeline_config.failed_table_path,
         },
+        "claimx-enricher": {
+            "claimx_projects_table_path": pipeline_config.claimx_projects_table_path,
+        },
         "claimx-delta-writer": {
             "events_table_path": pipeline_config.claimx_events_table_path,
         },
@@ -115,13 +112,10 @@ async def run_worker_from_registry(
 
     worker_def = WORKER_REGISTRY[worker_name]
 
-    # Build arguments - pass all common parameters directly
-    # Note: Previously used args_builder pattern was removed in favor of direct parameter passing
     kwargs = {
         "pipeline_config": pipeline_config,
         "shutdown_event": shutdown_event,
         "enable_delta_writes": enable_delta_writes,
-        "claimx_projects_table_path": pipeline_config.claimx_projects_table_path,
         "eventhub_config": eventhub_config,
         "local_kafka_config": local_kafka_config,
         "kafka_config": local_kafka_config,
@@ -131,10 +125,9 @@ async def run_worker_from_registry(
     if instance_id is not None:
         kwargs["instance_id"] = instance_id
 
-    # Add worker-specific table paths
     kwargs.update(_get_worker_table_paths(worker_name, pipeline_config))
 
-    # Run the worker, passing only kwargs that match the runner's signature
+    # Filter kwargs to match runner's signature (unless it accepts **kwargs)
     runner = worker_def["runner"]
     sig = inspect.signature(runner)
     has_var_keyword = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())

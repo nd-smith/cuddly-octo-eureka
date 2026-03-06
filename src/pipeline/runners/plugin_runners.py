@@ -42,9 +42,15 @@ async def run_itel_cabinet_tracking(shutdown_event: asyncio.Event, **kwargs):
     try:
         await execute_worker_with_shutdown(worker, "itel-cabinet", shutdown_event)
     finally:
-        await connection_manager.close()
-        await api_sender.stop()
-        await health_server.stop()
+        for cleanup_name, cleanup_coro in [
+            ("connection_manager", connection_manager.close()),
+            ("api_sender", api_sender.stop()),
+            ("health_server", health_server.stop()),
+        ]:
+            try:
+                await cleanup_coro
+            except Exception as e:
+                logger.error("Error during %s cleanup", cleanup_name, extra={"error": str(e)})
 
 
 async def run_eventhub_ui(shutdown_event: asyncio.Event, **kwargs):

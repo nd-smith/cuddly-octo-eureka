@@ -304,8 +304,72 @@ class TestExecuteWorkerWithShutdown:
         worker.stop.assert_called()
 
 
+class TestEnterWorkerErrorMode:
+    """Tests for _enter_worker_error_mode crash log callback."""
+
+    @pytest.mark.asyncio
+    async def test_crash_log_upload_failure_is_logged(self):
+        """H2: Crash log upload failure is logged via callback."""
+        from pipeline.runners.common import _enter_worker_error_mode
+
+        shutdown_event = asyncio.Event()
+        health_server = Mock()
+        health_server.set_error = Mock()
+        health_server.actual_port = 8080
+
+        with (
+            patch(
+                "pipeline.runners.common.upload_crash_logs",
+                side_effect=RuntimeError("upload failed"),
+            ),
+            patch("pipeline.runners.common.logger") as mock_logger,
+        ):
+            # Trigger shutdown after a brief delay
+            async def trigger():
+                await asyncio.sleep(0.05)
+                shutdown_event.set()
+
+            await asyncio.gather(
+                _enter_worker_error_mode(health_server, "test", "fatal", shutdown_event),
+                trigger(),
+            )
+
+            # The callback should have logged the upload failure
+            mock_logger.warning.assert_any_call(
+                "Crash log upload failed", extra={"error": "upload failed"}
+            )
+
+
 class TestExecuteWorkerWithProducer:
     """Tests for execute_worker_with_producer."""
+
+    @pytest.mark.asyncio
+    async def test_producer_stopped_when_worker_class_raises(self):
+        """H1: producer.stop() is called even when worker_class() constructor raises."""
+        shutdown_event = asyncio.Event()
+        shutdown_event.set()
+
+        mock_producer = AsyncMock()
+        mock_producer.start = AsyncMock()
+        mock_producer.stop = AsyncMock()
+
+        def bad_worker_class(**kwargs):
+            raise TypeError("bad constructor")
+
+        with (
+            patch("pipeline.common.transport.create_producer", return_value=mock_producer),
+            pytest.raises(TypeError, match="bad constructor"),
+        ):
+            await execute_worker_with_producer(
+                worker_class=bad_worker_class,
+                kafka_config=Mock(),
+                domain="claimx",
+                stage_name="test-worker",
+                shutdown_event=shutdown_event,
+            )
+
+        # Producer must still be stopped even though worker was never created
+        mock_producer.stop.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_creates_and_starts_producer_and_worker(self):

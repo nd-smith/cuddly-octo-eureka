@@ -201,6 +201,30 @@ class TestPipelineConfig:
             config = PipelineConfig.load_config(config_file)
         assert config.enable_delta_writes is False
 
+    def test_enable_delta_writes_accepts_1(self, tmp_path):
+        """M4: ENABLE_DELTA_WRITES=1 should be treated as True."""
+        data = {}
+        config_file = _write_config(tmp_path, data)
+        env = {
+            "EVENTHUB_NAMESPACE_CONNECTION_STRING": "conn_str",
+            "ENABLE_DELTA_WRITES": "1",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            config = PipelineConfig.load_config(config_file)
+        assert config.enable_delta_writes is True
+
+    def test_enable_delta_writes_accepts_yes(self, tmp_path):
+        """M4: ENABLE_DELTA_WRITES=yes should be treated as True."""
+        data = {}
+        config_file = _write_config(tmp_path, data)
+        env = {
+            "EVENTHUB_NAMESPACE_CONNECTION_STRING": "conn_str",
+            "ENABLE_DELTA_WRITES": "yes",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            config = PipelineConfig.load_config(config_file)
+        assert config.enable_delta_writes is True
+
     def test_enable_delta_writes_defaults_true(self, tmp_path):
         data = {}
         config_file = _write_config(tmp_path, data)
