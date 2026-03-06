@@ -215,13 +215,35 @@ Tracking review progress layer-by-layer through the ClaimX pipeline.
 
 ---
 
+### 9A. Shared Infrastructure — EventHub Transport + Retry (`src/pipeline/common/`)
+- **Reviewed:** 2026-03-05
+- **Commit:** `ccbc15f`
+- **Scope:** EventHub transport (~5,000 lines) and retry infrastructure (~1,900 lines)
+- **Files modified:** `batch_consumer.py`, `consumer.py`, `blob_dedup_store.py`, `json_checkpoint_store.py`, `retry/delta_handler.py`, `retry/retry_utils.py`, `verisk/retry/download_handler.py`
+- **Issues found:** 1 high, 2 medium, 3 low — all fixed
+- **Tests added/updated:** 3 new tests, 3 updated, 1 test class removed
+- **Key fixes:**
+  - **H1:** `_checkpoint_batch()` incremented `_batch_checkpoint_count` and logged success unconditionally — even when `update_checkpoint()` threw an exception; moved counter + logging inside try block
+  - **M1:** `event_data.offset` can be `None` per Azure SDK; `hasattr` check didn't guard against None, so `PipelineMessage.offset` (typed `int`) received None — added `is not None` guard with `int()` cast
+  - **M2:** `check_duplicate()` used fragile `"BlobNotFound" in str(e)` string matching — replaced with `ResourceNotFoundError` exception catch from `azure.core.exceptions`
+  - **L1:** Dead code in `json_checkpoint_store.py` — `ownership.get("owner_id", "UNKNOWN")` return value discarded; removed
+  - **L2:** Dead code — `_retry_topic_resolved` set but never read in `delta_handler.py` and `verisk/retry/download_handler.py`; removed both
+  - **L3:** Dead code — `record_dlq_metrics()` in `retry_utils.py` exported but never called anywhere; removed function, `__all__` entry, and now-unused `record_dlq_message` import
+- **Test updates:**
+  - Added `test_checkpoint_failure_does_not_increment_count` for batch consumer
+  - Added `test_handles_none_offset` for consumer record
+  - Updated blob dedup tests to use `ResourceNotFoundError` instead of `Exception("BlobNotFound")`
+  - Updated conftest to mock `azure.core.exceptions` with real exception class for `isinstance` checks
+  - Fixed existing assertion `msg.offset == "42"` → `msg.offset == 42` (offset is now properly cast to int)
+  - Removed `TestRecordDlqMetrics` test class (function deleted)
+
+---
+
 ## Up Next
 
-### 9. Shared Infrastructure (`src/pipeline/common/`)
-- EventHub consumer/producer
+### 9B. Shared Infrastructure — Remaining (`src/pipeline/common/`)
 - Delta Lake storage
 - OneLake storage
-- Retry infrastructure
 - Metrics, health, monitoring
 
 ---
