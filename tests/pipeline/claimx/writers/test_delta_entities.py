@@ -183,6 +183,74 @@ class TestClaimXEntityWriterWriteAll:
         assert counts.get("media") == 1
 
     @pytest.mark.asyncio
+    async def test_write_all_runs_tables_concurrently(
+        self,
+        claimx_entity_writer,
+        sample_project_row,
+        sample_contact_row,
+        sample_task_row,
+    ):
+        """Test that write_all dispatches table writes concurrently."""
+        import asyncio
+
+        call_order: list[str] = []
+
+        async def slow_merge(df, **kwargs):
+            call_order.append("merge_start")
+            await asyncio.sleep(0.01)
+            call_order.append("merge_end")
+            return True
+
+        async def slow_append(df):
+            call_order.append("append_start")
+            await asyncio.sleep(0.01)
+            call_order.append("append_end")
+            return True
+
+        # Patch writers with slow async ops
+        claimx_entity_writer._writers["projects"]._async_merge = AsyncMock(side_effect=slow_merge)
+        claimx_entity_writer._writers["contacts"]._async_append = AsyncMock(side_effect=slow_append)
+        claimx_entity_writer._writers["tasks"]._async_merge = AsyncMock(side_effect=slow_merge)
+
+        entity_rows = EntityRowsMessage(
+            projects=[sample_project_row],
+            contacts=[sample_contact_row],
+            tasks=[sample_task_row],
+        )
+
+        counts, failed_tables = await claimx_entity_writer.write_all(entity_rows)
+
+        assert len(counts) == 3
+        assert failed_tables == []
+        # With concurrent execution, all starts should happen before all ends
+        starts = [i for i, x in enumerate(call_order) if x.endswith("_start")]
+        ends = [i for i, x in enumerate(call_order) if x.endswith("_end")]
+        # At least 2 starts before the first end (proves concurrency)
+        assert starts[1] < ends[0], f"Writes appear sequential: {call_order}"
+
+    @pytest.mark.asyncio
+    async def test_write_all_handles_exception_in_gather(
+        self,
+        claimx_entity_writer,
+        sample_project_row,
+        sample_contact_row,
+    ):
+        """Test that write_all handles exceptions from individual table writes."""
+        claimx_entity_writer._writers["projects"]._async_merge = AsyncMock(
+            side_effect=RuntimeError("storage exploded")
+        )
+
+        entity_rows = EntityRowsMessage(
+            projects=[sample_project_row],
+            contacts=[sample_contact_row],
+        )
+
+        counts, failed_tables = await claimx_entity_writer.write_all(entity_rows)
+
+        assert "projects" in failed_tables
+        assert counts.get("contacts") == 1
+
+    @pytest.mark.asyncio
     async def test_write_all_empty_entity_rows(self, claimx_entity_writer):
         """Test writing with no data returns empty counts."""
         entity_rows = EntityRowsMessage()

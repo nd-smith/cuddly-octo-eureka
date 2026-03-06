@@ -9,12 +9,13 @@ Covers:
 - Subclass inheritance pattern
 """
 
+import os
 from concurrent.futures.process import BrokenProcessPool
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import polars as pl
 
-from pipeline.common.writers.base import BaseDeltaWriter
+from pipeline.common.writers.base import BaseDeltaWriter, _configure_object_store_timeouts
 
 _BASE = "pipeline.common.writers.base"
 
@@ -57,6 +58,20 @@ class TestBaseDeltaWriterInit:
     def test_none_z_order_becomes_empty_list(self):
         writer = _make_writer(z_order_columns=None)
         assert writer._z_order_columns == []
+
+    def test_default_subprocess_timeout(self):
+        writer = _make_writer()
+        assert writer.SUBPROCESS_TIMEOUT_SECONDS == 300
+
+    def test_custom_subprocess_timeout(self):
+        writer = _make_writer(subprocess_timeout_seconds=600)
+        assert writer.SUBPROCESS_TIMEOUT_SECONDS == 600
+
+    def test_custom_timeout_does_not_affect_class_default(self):
+        writer = _make_writer(subprocess_timeout_seconds=600)
+        assert writer.SUBPROCESS_TIMEOUT_SECONDS == 600
+        # Class-level default unchanged
+        assert BaseDeltaWriter.SUBPROCESS_TIMEOUT_SECONDS == 300
 
     def test_subclass_logger_uses_subclass_name(self):
         class MyWriter(BaseDeltaWriter):
@@ -385,3 +400,32 @@ class TestBaseDeltaWriterSubclass:
         writer = CustomWriter(table_path="abfss://ws@acct/table")
         result = await writer.upsert({"key": "val"})
         assert result is True
+
+
+# ---------------------------------------------------------------------------
+# object_store timeout configuration
+# ---------------------------------------------------------------------------
+
+
+class TestConfigureObjectStoreTimeouts:
+    def test_sets_env_vars(self):
+        """_configure_object_store_timeouts sets expected env vars."""
+        # Remove vars first so setdefault actually sets them
+        for key in ("AZURE_STORAGE_MAX_RETRIES", "AZURE_STORAGE_RETRY_TIMEOUT",
+                     "OBJECT_STORE_REQUEST_TIMEOUT"):
+            os.environ.pop(key, None)
+
+        _configure_object_store_timeouts()
+
+        assert os.environ["AZURE_STORAGE_MAX_RETRIES"] == "2"
+        assert os.environ["AZURE_STORAGE_RETRY_TIMEOUT"] == "30"
+        assert os.environ["OBJECT_STORE_REQUEST_TIMEOUT"] == "30"
+
+    def test_does_not_override_existing(self):
+        """_configure_object_store_timeouts respects existing env vars."""
+        os.environ["AZURE_STORAGE_MAX_RETRIES"] = "10"
+        try:
+            _configure_object_store_timeouts()
+            assert os.environ["AZURE_STORAGE_MAX_RETRIES"] == "10"
+        finally:
+            os.environ.pop("AZURE_STORAGE_MAX_RETRIES", None)

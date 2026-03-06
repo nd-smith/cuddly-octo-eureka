@@ -201,6 +201,8 @@ TRANSIENT_ERROR_MARKERS = frozenset(
         "temporarily unavailable",
         "service unavailable",
         "gateway",
+        "invalid list response",
+        "ill-formed document",
     }
 )
 
@@ -313,6 +315,11 @@ _EXCEPTION_MARKER_RULES: list[tuple[tuple[str, ...], ErrorCategory]] = [
             "commitfailederror", "failed to commit transaction",
             "transaction conflict", "version conflict", "concurrent modification",
         ),
+        ErrorCategory.TRANSIENT,
+    ),
+    # Azure storage malformed responses (transient — Azure returned truncated XML)
+    (
+        ("invalid list response", "ill-formed document"),
         ErrorCategory.TRANSIENT,
     ),
     # Connection errors

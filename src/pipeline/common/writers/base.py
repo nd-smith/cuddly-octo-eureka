@@ -18,6 +18,7 @@ import atexit
 import io
 import logging
 import multiprocessing
+import os
 import time
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
@@ -31,6 +32,24 @@ from pipeline.common.metrics import delta_write_duration_seconds
 # Module-level subprocess functions (must be top-level for pickling)
 # ---------------------------------------------------------------------------
 
+def _configure_object_store_timeouts() -> None:
+    """Set environment variables to bound object_store (Rust) retry/timeout behaviour.
+
+    Without these, the Rust object_store crate may retry Azure Blob Storage
+    list/get operations indefinitely when Azure returns malformed XML responses
+    (e.g. ``ill-formed document: start tag not closed``), causing the subprocess
+    to hang until the asyncio timeout kills it.
+
+    Budget:  each request ≤30 s  ×  2 retries  =  ≤90 s worst-case Rust time.
+    The Python ``@with_retry`` on ``DeltaTableWriter.merge()`` adds up to 2 more
+    attempts with 1-10 s backoff, but the 300 s ``SUBPROCESS_TIMEOUT_SECONDS``
+    acts as a hard ceiling so total wall-clock never exceeds 5 min.
+    """
+    os.environ.setdefault("AZURE_STORAGE_MAX_RETRIES", "2")
+    os.environ.setdefault("AZURE_STORAGE_RETRY_TIMEOUT", "30")
+    os.environ.setdefault("OBJECT_STORE_REQUEST_TIMEOUT", "30")
+
+
 def _subprocess_delta_append(
     table_path: str,
     df_ipc_bytes: bytes,
@@ -40,6 +59,7 @@ def _subprocess_delta_append(
     batch_id: str | None,
 ) -> int:
     """Run DeltaTableWriter.append in a subprocess."""
+    _configure_object_store_timeouts()
     from pipeline.common.storage.delta import DeltaTableWriter
 
     df = pl.read_ipc(io.BytesIO(df_ipc_bytes))
@@ -63,6 +83,7 @@ def _subprocess_delta_merge(
     update_condition: str | None,
 ) -> int:
     """Run DeltaTableWriter.merge in a subprocess."""
+    _configure_object_store_timeouts()
     from pipeline.common.storage.delta import DeltaTableWriter
 
     df = pl.read_ipc(io.BytesIO(df_ipc_bytes))
@@ -92,7 +113,7 @@ def _get_delta_process_pool() -> ProcessPoolExecutor:
     global _process_pool
     if _process_pool is None:
         ctx = multiprocessing.get_context("forkserver")
-        _process_pool = ProcessPoolExecutor(max_workers=2, mp_context=ctx)
+        _process_pool = ProcessPoolExecutor(max_workers=4, mp_context=ctx)
         atexit.register(_shutdown_delta_process_pool)
     return _process_pool
 
@@ -153,10 +174,11 @@ class BaseDeltaWriter:
                 return await self._async_append(df)
     """
 
-    # Timeout for subprocess Delta writes. Prevents indefinite hangs when
-    # the subprocess blocks on storage I/O (e.g., after a WebSocket reconnection
-    # with stale credentials). On timeout the batch returns False (triggering
-    # retry logic) and the held batch_lock is released, unblocking consumers.
+    # Default timeout for subprocess Delta writes. Prevents indefinite hangs
+    # when the subprocess blocks on storage I/O (e.g., after a WebSocket
+    # reconnection with stale credentials). On timeout the batch returns False
+    # (triggering retry logic) and the held batch_lock is released, unblocking
+    # consumers. Can be overridden per-instance via the constructor.
     SUBPROCESS_TIMEOUT_SECONDS = 300  # 5 minutes
 
     def __init__(
@@ -165,6 +187,7 @@ class BaseDeltaWriter:
         timestamp_column: str = "ingested_at",
         partition_column: str | None = None,
         z_order_columns: list[str] | None = None,
+        subprocess_timeout_seconds: int | None = None,
     ):
         """
         Initialize base Delta writer.
@@ -181,6 +204,9 @@ class BaseDeltaWriter:
         """
         self.table_path = table_path
         self.logger = logging.getLogger(self.__class__.__name__)
+
+        if subprocess_timeout_seconds is not None:
+            self.SUBPROCESS_TIMEOUT_SECONDS = subprocess_timeout_seconds
 
         self._timestamp_column = timestamp_column
         self._partition_column = partition_column
