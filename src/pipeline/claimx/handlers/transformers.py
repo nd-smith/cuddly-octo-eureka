@@ -23,11 +23,24 @@ from pipeline.claimx.handlers.utils import (
 logger = logging.getLogger(__name__)
 
 
+def _safe_json_dumps(value: Any) -> str | None:
+    """Safely serialize a value to JSON string, returning None if value is None."""
+    if value is None:
+        return None
+    try:
+        return json.dumps(value)
+    except (TypeError, ValueError):
+        return str(value)
+
+
 def project_to_row(
     data: dict[str, Any],
     trace_id: str | None,
 ) -> dict[str, Any]:
-    """Transform API response to project row."""
+    """Transform project API response to a flat row dict for the claimx_projects Delta table.
+
+    Handles both wrapped ({"data": {"project": ...}}) and flat ({"project": ...}) response shapes.
+    """
     inner = data.get("data", data)
     project = inner.get("project", {})
     customer = project.get("customerInformation", {})
@@ -147,7 +160,10 @@ def project_to_contacts(
     project_id: str,
     trace_id: str,
 ) -> list[dict[str, Any]]:
-    """Extract contacts from project API response."""
+    """Extract policyholder and team member contacts from project API response.
+
+    Returns one POLICYHOLDER row (if email exists) plus one CLAIM_REP row per team member.
+    """
     contacts = []
     today = today_date()
 
@@ -200,7 +216,7 @@ def task_to_row(
     data: dict[str, Any],
     trace_id: str,
 ) -> dict[str, Any]:
-    """Transform task assignment to row."""
+    """Transform task assignment API response to a row dict for the claimx_tasks Delta table."""
     row = {
         "assignment_id": safe_int(data.get("assignmentId")),
         "task_id": safe_int(data.get("taskId")),
@@ -233,7 +249,7 @@ def template_to_row(
     template: dict[str, Any],
     trace_id: str,
 ) -> dict[str, Any]:
-    """Transform custom task template to row."""
+    """Transform custom task template to a row dict for the claimx_task_templates Delta table."""
     row = {
         "task_id": safe_int(template.get("taskId")),
         "comp_id": safe_int(template.get("compId")),
@@ -268,7 +284,7 @@ def link_to_row(
     project_id: Any,
     trace_id: str,
 ) -> dict[str, Any]:
-    """Transform external link data to row."""
+    """Transform external link data to a row dict for the claimx_external_links Delta table."""
     row = {
         "link_id": safe_int(link.get("linkId")),
         "assignment_id": assignment_id,
@@ -291,7 +307,7 @@ def link_to_contact(
     assignment_id: int,
     trace_id: str,
 ) -> dict[str, Any] | None:
-    """Extract contact from external link data."""
+    """Extract contact from external link data, or None if no email is present."""
     email = safe_str(link.get("email"))
     if not email:
         return None
@@ -320,7 +336,7 @@ def media_to_row(
     project_id: Any,
     trace_id: str,
 ) -> dict[str, Any]:
-    """Transform media item to row."""
+    """Transform media item to a row dict for the claimx_media_metadata Delta table."""
     download_link = safe_str(media.get("fullDownloadLink"))
 
     row = {
@@ -369,11 +385,15 @@ def build_task_event(
     event_type: str,
     project_id: str,
 ) -> dict[str, Any]:
-    """Build a ClaimXTaskEvent dict from project, task, and media API responses."""
+    """Build a ClaimXTaskEvent dict from project, task, and media API responses.
+
+    Combines data from three API calls into a single enriched event for downstream
+    consumers (e.g. iTel cabinet). Address fields come from project.address, not customer.
+    """
     inner = project_response.get("data", project_response)
     project = inner.get("project", {})
     customer = project.get("customerInformation", {})
-    address = customer.get("address", {})
+    address = project.get("address", {})
 
     # Report fields from media response (conditional)
     report_id = safe_int(task_response.get("pdfProjectMediaId"))
@@ -382,7 +402,7 @@ def build_task_event(
     media_id = None
 
     if media_response:
-        media_item = media_response[0] if media_response else None
+        media_item = media_response[0]
         if media_item:
             report_url = safe_str(media_item.get("fullDownloadLink"))
             report_name = safe_str(media_item.get("mediaDescription"))
@@ -409,7 +429,7 @@ def build_task_event(
         "date_task_assigned": safe_str(task_response.get("dateAssigned")),
         "date_task_completed": safe_str(task_response.get("dateCompleted")),
         "cancelled_date": safe_str(task_response.get("cancelledDate")),
-        "form_response": json.dumps(task_response["response"]) if task_response.get("response") is not None else None,
+        "form_response": _safe_json_dumps(task_response.get("response")),
         "report_id": report_id,
         "report_url": report_url,
         "report_name": report_name,
@@ -446,7 +466,7 @@ def video_collab_to_row(
     data: dict[str, Any],
     trace_id: str,
 ) -> dict[str, Any]:
-    """Transform API response to video collaboration row."""
+    """Transform API response to a row dict for the claimx_video_collab Delta table."""
     first_name = safe_str(data.get("claimRepFirstName"))
     last_name = safe_str(data.get("claimRepLastName"))
     full_name = safe_str(data.get("claimRepFullName"))

@@ -32,7 +32,7 @@ class ProjectCache:
     def add(self, project_id: str) -> None:
         self._projects.add(project_id)
 
-    def load_from_ids(self, project_ids: list[str]) -> int:
+    def load_from_ids(self, project_ids: list[str | int]) -> int:
         """
         Preload cache with existing project IDs.
 

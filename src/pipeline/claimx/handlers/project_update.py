@@ -78,10 +78,20 @@ class ProjectUpdateHandler(EventHandler):
 
         event_config = EVENT_FIELD_MAPPING.get(event.event_type)
         if not event_config:
+            logger.warning(
+                "Unknown event type for project update handler",
+                extra={
+                    "handler_name": ProjectUpdateHandler.HANDLER_NAME,
+                    "event_type": event.event_type,
+                    **extract_log_context(event),
+                },
+            )
             return EnrichmentResult(
                 event=event,
                 success=False,
                 error=f"Unknown event type: {event.event_type}",
+                error_category=ErrorCategory.PERMANENT,
+                is_retryable=False,
                 api_calls=0,
                 duration_ms=0,
             )

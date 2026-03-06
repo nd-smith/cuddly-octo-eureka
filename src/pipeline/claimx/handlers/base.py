@@ -33,16 +33,12 @@ class EnrichmentResult:
 
     event: ClaimXEventMessage
     success: bool
-    rows: EntityRowsMessage | None = field(default_factory=EntityRowsMessage)
+    rows: EntityRowsMessage = field(default_factory=EntityRowsMessage)
     error: str | None = None
     error_category: ErrorCategory | None = None
     is_retryable: bool = True
     api_calls: int = 0
     duration_ms: int = 0
-
-    def __post_init__(self):
-        if self.rows is None:
-            self.rows = EntityRowsMessage()
 
 
 @dataclass
@@ -95,10 +91,9 @@ def aggregate_results(
 
     for enrichment_result in results:
         if enrichment_result is None:
-            logger.error(
-                "Invalid handler result",
+            logger.warning(
+                "Skipping None enrichment result (should not happen)",
                 extra={"handler_name": handler_name},
-                exc_info=True,
             )
             continue
         total += 1
@@ -246,7 +241,7 @@ class EventHandler(ABC):
                         "handler_name": self.name,
                         **extract_log_context(event),
                     },
-                    exc_info=True,
+                    exc_info=result,
                 )
                 # Create failure result
                 final_results.append(
@@ -282,6 +277,7 @@ class EventHandler(ABC):
         return final_results
 
     async def process(self, events: list[ClaimXEventMessage]) -> HandlerResult:
+        """Main entry point: batch-process events and aggregate into a HandlerResult."""
         if not events:
             logger.debug(
                 "No events to process",
@@ -305,9 +301,9 @@ class EventHandler(ABC):
         start_time = datetime.now(UTC)
 
         # Log event type distribution
-        event_type_counts: dict[str, int] = {}
-        for event in events:
-            event_type_counts[event.event_type] = event_type_counts.get(event.event_type, 0) + 1
+        from collections import Counter
+
+        event_type_counts = dict(Counter(event.event_type for event in events))
 
         logger.debug(
             "Processing events",
@@ -346,13 +342,18 @@ class HandlerRegistry:
     """Registry mapping event types to handler classes."""
 
     def get_handler_class(self, event_type: str) -> type[EventHandler] | None:
+        """Look up the handler class registered for an event type, or None."""
         return _HANDLERS.get(event_type)
 
     def get_handler(
         self,
         event_type: str,
         client: ClaimXApiClient,
+        project_cache: Optional["ProjectCache"] = None,
+        task_event_producer: Any | None = None,
+        video_event_producer: Any | None = None,
     ) -> EventHandler | None:
+        """Instantiate the handler for an event type with all dependencies, or return None."""
         handler_class = _HANDLERS.get(event_type)
         if handler_class is None:
             logger.debug(
@@ -362,12 +363,18 @@ class HandlerRegistry:
                 },
             )
             return None
-        return handler_class(client)
+        return handler_class(
+            client,
+            project_cache=project_cache,
+            task_event_producer=task_event_producer,
+            video_event_producer=video_event_producer,
+        )
 
     def group_events_by_handler(
         self,
         events: list[ClaimXEventMessage],
     ) -> dict[type[EventHandler], list[ClaimXEventMessage]]:
+        """Group events by their registered handler class. Unhandled types are logged and skipped."""
         groups: dict[type[EventHandler], list[ClaimXEventMessage]] = defaultdict(list)
         unhandled_types: dict[str, int] = {}
 
@@ -403,6 +410,7 @@ class HandlerRegistry:
         return dict(groups)
 
     def get_registered_handlers(self) -> dict[str, str]:
+        """Return a mapping of event_type → handler class name for all registered handlers."""
         return {event_type: handler.__name__ for event_type, handler in _HANDLERS.items()}
 
 

@@ -50,7 +50,12 @@ class TaskHandler(EventHandler):
         self, response: dict, event: ClaimXEventMessage,
         assignment_id: int, project_id: int, project_rows: EntityRowsMessage,
     ) -> EntityRowsMessage:
-        """Build entity rows from task API response."""
+        """Build entity rows from task API response.
+
+        Extracts task, template, external link, and contact rows from the response,
+        merging in project verification rows. Attaches _form_response_groups for
+        downstream routing (e.g. iTel filter).
+        """
         rows = EntityRowsMessage()
 
         task_row = transformers.task_to_row(response, trace_id=event.trace_id)
@@ -153,8 +158,10 @@ class TaskHandler(EventHandler):
         try:
             response = await self.client.get_custom_task(assignment_id)
 
-            project_id = safe_int(response.get("projectId")) or int(event.project_id)
-            assignment_id = safe_int(response.get("assignmentId")) or assignment_id
+            resp_project_id = safe_int(response.get("projectId"))
+            project_id = resp_project_id if resp_project_id is not None else int(event.project_id)
+            resp_assignment_id = safe_int(response.get("assignmentId"))
+            assignment_id = resp_assignment_id if resp_assignment_id is not None else assignment_id
 
             project_rows = await self.ensure_project_exists(
                 project_id, trace_id=event.trace_id,
@@ -163,10 +170,12 @@ class TaskHandler(EventHandler):
             rows = self._build_task_rows(response, event, assignment_id, project_id, project_rows)
 
             # Produce enriched task event to downstream EventHub
+            production_failed = False
             if self.task_event_producer:
                 try:
                     await self._produce_task_event(response, event, project_id)
                 except Exception as e:
+                    production_failed = True
                     logger.error(
                         "Failed to produce task event",
                         extra={
@@ -190,6 +199,15 @@ class TaskHandler(EventHandler):
                     **extract_log_context(event),
                 },
             )
+
+            if production_failed:
+                return EnrichmentResult(
+                    event=event, success=False, rows=rows,
+                    error="Failed to produce task event to EventHub",
+                    error_category=ErrorCategory.TRANSIENT,
+                    is_retryable=True,
+                    api_calls=api_calls, duration_ms=elapsed_ms(start_time),
+                )
 
             return EnrichmentResult(
                 event=event, success=True, rows=rows,

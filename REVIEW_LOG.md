@@ -21,18 +21,32 @@ Tracking review progress layer-by-layer through the ClaimX pipeline.
 
 ---
 
-## Up Next
-
 ### 2. Handlers (`src/pipeline/claimx/handlers/`)
-- `base.py` — Base handler class (shared error handling, retry logic)
-- `project.py` — PROJECT_CREATED handler
-- `project_update.py` — PROJECT_FILE_ADDED / PROJECT_MFN_ADDED handler
-- `project_cache.py` — Project data caching layer
-- `media.py` — Media/file download task creation
-- `task.py` — CUSTOM_TASK_ASSIGNED / CUSTOM_TASK_COMPLETED handler
-- `video.py` — VIDEO_COLLABORATION handler
-- `transformers.py` — API response → schema transformers
-- `utils.py` — Shared handler utilities (safe_str, safe_int, etc.)
+- **Reviewed:** 2026-03-05
+- **Files:** `base.py`, `project.py`, `project_update.py`, `project_cache.py`, `media.py`, `task.py`, `video.py`, `transformers.py`, `utils.py`, `__init__.py`
+- **Issues found:** 3 critical, 4 high, 6 medium, 3 low — all fixed
+- **Tests added/updated:** 8 new tests, 2 updated
+- **Key fixes:**
+  - **C1:** `build_task_event()` extracted address from `customer` instead of `project` — all downstream task event address fields were empty
+  - **C2:** `MediaHandler.process()` silently dropped events when `asyncio.gather` returned an exception for a group — now creates error `EnrichmentResult` for every event in the failed group
+  - **C3:** `ProjectUpdateHandler` returned retryable error for unknown event types, causing infinite retry — now `PERMANENT` / non-retryable
+  - **H1:** `TaskHandler` and `VideoCollabHandler` returned `success=True` when EventHub production failed — now returns failure with `TRANSIENT` category
+  - **H2:** `HandlerRegistry.get_handler()` omitted `project_cache`, `task_event_producer`, `video_event_producer` — added optional kwargs passthrough
+  - **H3:** `int(m)` on non-numeric media_id raised `ValueError` — replaced with `safe_int` filter
+  - **H4:** `exc_info=True` outside except block captured no traceback — changed to `exc_info=result`
+  - **M1:** Misleading `logger.error` with `exc_info=True` for None check → `logger.warning`
+  - **M2:** `EnrichmentResult.rows` typed `EntityRowsMessage | None` but never actually None — simplified type and removed `__post_init__`
+  - **M3:** `or` fallback masked zero values for `project_id`/`assignment_id` — explicit `is not None` checks
+  - **M4:** Unguarded `json.dumps` on task form response — added `_safe_json_dumps` with `TypeError`/`ValueError` fallback
+  - **M5:** Redundant truthiness check inside guarded block — simplified
+  - **L1:** Added `logger.warning` for unknown event type rejection
+  - **L2:** `project_cache.load_from_ids` parameter type `list[str]` → `list[str | int]`
+  - **L3:** Manual dict counting → `Counter`
+  - Added docstrings across `utils.py` (all `safe_*` converters, timestamp functions), `base.py` (registry methods, `process`), `transformers.py` (target Delta tables, response shapes), `media.py` (fetch strategy, error attribution), `task.py` (multi-entity extraction)
+
+---
+
+## Up Next
 
 ### 3. Workers (`src/pipeline/claimx/workers/`)
 - `event_ingester.py` — EventHub consumer → enrichment task producer

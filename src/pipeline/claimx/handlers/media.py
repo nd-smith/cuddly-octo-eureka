@@ -93,13 +93,28 @@ class MediaHandler(EventHandler):
         groups_succeeded = 0
         groups_failed = 0
 
-        for group_result in group_results:
+        # Build a mapping from group key to events for error recovery
+        group_keys = list(groups.keys())
+
+        for idx, group_result in enumerate(group_results):
             if isinstance(group_result, Exception):
                 groups_failed += 1
+                group_key = group_keys[idx]
+                group_events = groups[group_key]
                 logger.error(
                     "Batch group processing failed",
-                    extra={"handler_name": self.name},
-                    exc_info=True,
+                    extra={
+                        "handler_name": self.name,
+                        "project_id": group_key,
+                        "events_in_group": len(group_events),
+                    },
+                    exc_info=group_result,
+                )
+                results.extend(
+                    self._build_batch_error_results(
+                        group_events, group_result,
+                        ErrorCategory.TRANSIENT, True, 0,
+                    )
                 )
                 continue
             _key, batch_results = group_result
@@ -135,7 +150,10 @@ class MediaHandler(EventHandler):
 
     @staticmethod
     def _normalize_media_response(response) -> list[dict]:
-        """Normalize API response to a list of media dicts."""
+        """Normalize API response to a list of media dicts.
+
+        Handles list, dict ({"data": [...]}), and single-item responses.
+        """
         if isinstance(response, list):
             media_list = response
         elif isinstance(response, dict):
@@ -151,7 +169,10 @@ class MediaHandler(EventHandler):
         self, events: list[ClaimXEventMessage], error: Exception,
         error_category: ErrorCategory, is_retryable: bool, duration: int,
     ) -> list[EnrichmentResult]:
-        """Build error results for all events in a failed batch."""
+        """Build error results for all events in a failed batch.
+
+        API calls and duration are attributed to the first event only to avoid double-counting.
+        """
         return [
             EnrichmentResult(
                 event=event,
@@ -264,7 +285,11 @@ class MediaHandler(EventHandler):
     async def _fetch_media_by_id(
         self, project_id: int, media_ids: list[str],
     ) -> dict[int, dict]:
-        """Fetch media from API and return a dict keyed by media ID."""
+        """Fetch media from API and return a dict keyed by media ID.
+
+        Uses selective fetch (by specific IDs) for small batches to reduce payload,
+        or full project media fetch when batch exceeds BATCH_THRESHOLD.
+        """
         fetch_strategy = "selective" if len(media_ids) <= BATCH_THRESHOLD else "full"
         logger.debug(
             "Media fetch strategy selected",
@@ -279,9 +304,10 @@ class MediaHandler(EventHandler):
         )
 
         if len(media_ids) <= BATCH_THRESHOLD:
+            numeric_ids = [mid for m in media_ids if m and (mid := safe_int(m)) is not None]
             response = await self.client.get_project_media(
                 project_id,
-                media_ids=[int(m) for m in media_ids if m],
+                media_ids=numeric_ids,
             )
         else:
             response = await self.client.get_project_media(project_id)

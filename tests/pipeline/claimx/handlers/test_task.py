@@ -191,6 +191,35 @@ class TestTaskHandlerSuccess:
 
 
 # ============================================================================
+# TaskHandler.handle_event - Producer failure
+# ============================================================================
+
+
+class TestTaskHandlerProducerFailure:
+    async def test_producer_failure_returns_failed_result(self, mock_client):
+        """H1: Producer failure should not silently return success."""
+        mock_client.get_custom_task = AsyncMock(return_value=_make_task_response())
+        mock_client.get_project = AsyncMock(return_value=make_project_api_response())
+
+        mock_producer = AsyncMock()
+        mock_producer.send = AsyncMock(side_effect=RuntimeError("EventHub down"))
+
+        handler = TaskHandler(mock_client, task_event_producer=mock_producer)
+        event = make_event(
+            event_type="CUSTOM_TASK_ASSIGNED",
+            task_assignment_id="100",
+        )
+
+        result = await handler.handle_event(event)
+
+        assert result.success is False
+        assert result.error_category == ErrorCategory.TRANSIENT
+        assert result.is_retryable is True
+        # Rows should still be populated even though production failed
+        assert len(result.rows.tasks) == 1
+
+
+# ============================================================================
 # TaskHandler.handle_event - Validation
 # ============================================================================
 

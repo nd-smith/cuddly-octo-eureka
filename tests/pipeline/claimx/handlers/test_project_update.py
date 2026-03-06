@@ -100,7 +100,7 @@ class TestProjectUpdateXALinkingFail:
 
 
 class TestProjectUpdateUnknownEvent:
-    async def test_unknown_event_type_returns_failure(self, mock_client):
+    async def test_unknown_event_type_returns_permanent_failure(self, mock_client):
         handler = ProjectUpdateHandler(mock_client)
         # Bypass the event_types check by constructing event directly
         event = make_event(event_type="UNKNOWN_EVENT")
@@ -109,6 +109,8 @@ class TestProjectUpdateUnknownEvent:
 
         assert result.success is False
         assert "Unknown event type" in result.error
+        assert result.error_category == ErrorCategory.PERMANENT
+        assert result.is_retryable is False
         assert result.api_calls == 0
 
 

@@ -520,6 +520,56 @@ def _make_form_response():
     }
 
 
+class TestBuildTaskEventAddressFields:
+    def test_address_fields_populated_from_project(self):
+        """C1: Address fields should come from project, not customer."""
+        result = build_task_event(
+            project_response=make_project_api_response(),
+            task_response={"assignmentId": 100, "taskId": 200, "status": "ASSIGNED"},
+            media_response=None,
+            trace_id="evt_001",
+            event_type="CUSTOM_TASK_ASSIGNED",
+            project_id="123",
+        )
+
+        assert result["loss_address_street"] == "123 Main St"
+        assert result["loss_address_city"] == "Springfield"
+        assert result["loss_address_state_province"] == "IL"
+        assert result["loss_address_zip_postcode"] == "62701"
+
+    def test_address_fields_not_from_customer(self):
+        """C1: Address fields should NOT come from customerInformation."""
+        data = {
+            "data": {
+                "project": {
+                    "projectId": 123,
+                    "customerInformation": {
+                        "address": {
+                            "street1": "WRONG",
+                            "city": "WRONG",
+                        },
+                    },
+                    "address": {
+                        "street1": "CORRECT",
+                        "city": "CORRECT",
+                    },
+                },
+                "teamMembers": [],
+            },
+        }
+        result = build_task_event(
+            project_response=data,
+            task_response={"assignmentId": 100, "taskId": 200, "status": "ASSIGNED"},
+            media_response=None,
+            trace_id="evt_001",
+            event_type="CUSTOM_TASK_ASSIGNED",
+            project_id="123",
+        )
+
+        assert result["loss_address_street"] == "CORRECT"
+        assert result["loss_address_city"] == "CORRECT"
+
+
 class TestBuildTaskEventFormResponse:
     def test_form_response_is_json_string_when_present(self):
         task_response = {
@@ -602,6 +652,28 @@ class TestBuildTaskEventFormResponse:
         assert isinstance(serialized["form_response"], str)
         parsed = json.loads(serialized["form_response"])
         assert "groups" in parsed
+
+
+    def test_form_response_handles_non_serializable(self):
+        """M4: Non-serializable response should not crash."""
+        task_response = {
+            "assignmentId": 100,
+            "taskId": 200,
+            "status": "COMPLETED",
+            "response": {"data": object()},  # Not JSON-serializable
+        }
+        result = build_task_event(
+            project_response=make_project_api_response(),
+            task_response=task_response,
+            media_response=None,
+            trace_id="evt_001",
+            event_type="CUSTOM_TASK_COMPLETED",
+            project_id="123",
+        )
+
+        # Should not crash, should return a string representation
+        assert result["form_response"] is not None
+        assert isinstance(result["form_response"], str)
 
 
 class TestClaimXTaskEventFormResponseValidator:

@@ -86,10 +86,12 @@ class VideoCollabHandler(EventHandler):
                 rows.video_collab.append(video_row)
 
             # Produce enriched video event to downstream EventHub
+            production_failed = False
             if self.video_event_producer:
                 try:
                     await self._produce_video_event(collab_data, event)
                 except Exception as e:
+                    production_failed = True
                     logger.error(
                         "Failed to produce video collab event",
                         extra={
@@ -109,6 +111,18 @@ class VideoCollabHandler(EventHandler):
                     **extract_log_context(event),
                 },
             )
+
+            if production_failed:
+                return EnrichmentResult(
+                    event=event,
+                    success=False,
+                    rows=rows,
+                    error="Failed to produce video collab event to EventHub",
+                    error_category=ErrorCategory.TRANSIENT,
+                    is_retryable=True,
+                    api_calls=api_calls,
+                    duration_ms=elapsed_ms(start_time),
+                )
 
             return EnrichmentResult(
                 event=event,

@@ -23,6 +23,7 @@ API_CALLS_WITH_VERIFICATION = 2  # Primary fetch + project verification
 
 
 def safe_int(value: Any) -> int | None:
+    """Convert value to int, returning None on failure. Logs a warning on conversion error."""
     if value is None:
         return None
     try:
@@ -36,6 +37,7 @@ def safe_int(value: Any) -> int | None:
 
 
 def safe_str(value: Any) -> str | None:
+    """Convert value to stripped string. Returns None for None or empty/whitespace-only strings."""
     if value is None:
         return None
     s = str(value).strip()
@@ -43,6 +45,7 @@ def safe_str(value: Any) -> str | None:
 
 
 def safe_str_id(value: Any) -> str | None:
+    """Convert value to string ID. Numeric values are truncated to int first (e.g. 123.0 → "123")."""
     if value is None:
         return None
     if isinstance(value, (int, float)):
@@ -52,6 +55,7 @@ def safe_str_id(value: Any) -> str | None:
 
 
 def safe_bool(value: Any) -> bool | None:
+    """Convert value to bool. Strings "true", "1", "yes" (case-insensitive) are truthy."""
     if value is None:
         return None
     if isinstance(value, bool):
@@ -62,6 +66,7 @@ def safe_bool(value: Any) -> bool | None:
 
 
 def safe_float(value: Any) -> float | None:
+    """Convert value to float, returning None on failure. Logs a warning on conversion error."""
     if value is None:
         return None
     try:
@@ -75,6 +80,7 @@ def safe_float(value: Any) -> float | None:
 
 
 def safe_decimal_str(value: Any) -> str | None:
+    """Convert value to a decimal string representation for lossless storage."""
     if value is None:
         return None
     try:
@@ -88,6 +94,7 @@ def safe_decimal_str(value: Any) -> str | None:
 
 
 def parse_timestamp(value: Any) -> str | None:
+    """Convert timestamp to ISO 8601 string. Normalizes 'Z' suffix to '+00:00'."""
     if value is None:
         return None
     if isinstance(value, datetime):
@@ -99,14 +106,17 @@ def parse_timestamp(value: Any) -> str | None:
 
 
 def now_iso() -> str:
+    """Return current UTC time as ISO 8601 string."""
     return datetime.now(UTC).isoformat()
 
 
 def now_datetime() -> datetime:
+    """Return current UTC datetime."""
     return datetime.now(UTC)
 
 
 def today_date() -> date:
+    """Return current UTC date."""
     return datetime.now(UTC).date()
 
 
@@ -122,6 +132,7 @@ def _parse_timestamp_str(s: str) -> datetime | None:
 
 
 def parse_timestamp_dt(value: Any) -> datetime | None:
+    """Convert timestamp to datetime object (unlike parse_timestamp which returns a string)."""
     if value is None:
         return None
     if isinstance(value, datetime):
@@ -132,6 +143,7 @@ def parse_timestamp_dt(value: Any) -> datetime | None:
 
 
 def elapsed_ms(start: datetime) -> int:
+    """Return milliseconds elapsed since start time."""
     return int((datetime.now(UTC) - start).total_seconds() * 1000)
 
 

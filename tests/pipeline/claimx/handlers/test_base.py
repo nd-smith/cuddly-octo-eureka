@@ -67,11 +67,11 @@ class TestEnrichmentResult:
 
         assert result.rows.is_empty()
 
-    def test_enrichment_result_none_rows_becomes_empty(self):
+    def test_enrichment_result_default_rows_is_entity_rows_message(self):
         event = make_event()
-        result = EnrichmentResult(event=event, success=True, rows=None)
+        result = EnrichmentResult(event=event, success=True)
 
-        assert result.rows is not None
+        assert isinstance(result.rows, EntityRowsMessage)
         assert result.rows.is_empty()
 
 
@@ -357,6 +357,25 @@ class TestHandlerRegistry:
         registry = HandlerRegistry()
         handler = registry.get_handler("UNKNOWN_EVENT", mock_client)
         assert handler is None
+
+    def test_get_handler_passes_optional_dependencies(self, mock_client, mock_project_cache):
+        """H2: get_handler should pass through project_cache and producers."""
+        registry = HandlerRegistry()
+        mock_task_producer = AsyncMock()
+        mock_video_producer = AsyncMock()
+
+        handler = registry.get_handler(
+            "CUSTOM_TASK_ASSIGNED",
+            mock_client,
+            project_cache=mock_project_cache,
+            task_event_producer=mock_task_producer,
+            video_event_producer=mock_video_producer,
+        )
+
+        assert handler is not None
+        assert handler.project_cache is mock_project_cache
+        assert handler.task_event_producer is mock_task_producer
+        assert handler.video_event_producer is mock_video_producer
 
     def test_group_events_by_handler_groups_correctly(self):
         registry = HandlerRegistry()

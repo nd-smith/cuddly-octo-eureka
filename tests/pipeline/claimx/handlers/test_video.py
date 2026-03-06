@@ -70,6 +70,32 @@ class TestVideoCollabHandlerSuccess:
 
 
 # ============================================================================
+# VideoCollabHandler.handle_event - Producer failure
+# ============================================================================
+
+
+class TestVideoCollabHandlerProducerFailure:
+    async def test_producer_failure_returns_failed_result(self, mock_client):
+        """H1: Producer failure should not silently return success."""
+        mock_client.get_video_collaboration = AsyncMock(return_value=_make_collab_response())
+        mock_client.get_project = AsyncMock(return_value=make_project_api_response())
+
+        mock_producer = AsyncMock()
+        mock_producer.send = AsyncMock(side_effect=RuntimeError("EventHub down"))
+
+        handler = VideoCollabHandler(mock_client, video_event_producer=mock_producer)
+        event = make_event(event_type="VIDEO_COLLABORATION_INVITE_SENT", project_id="123")
+
+        result = await handler.handle_event(event)
+
+        assert result.success is False
+        assert result.error_category == ErrorCategory.TRANSIENT
+        assert result.is_retryable is True
+        # Rows should still be populated
+        assert len(result.rows.video_collab) == 1
+
+
+# ============================================================================
 # VideoCollabHandler._extract_collab_data
 # ============================================================================
 

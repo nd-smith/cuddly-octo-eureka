@@ -192,6 +192,23 @@ class TestMediaHandlerHandleBatch:
         assert len(results) == 1
         assert results[0].success is False
 
+    async def test_handle_batch_non_numeric_media_id(self, mock_client):
+        """H3: Non-numeric media_id should not crash with ValueError."""
+        mock_client.get_project_media = AsyncMock(return_value=[])
+        mock_client.get_project = AsyncMock(return_value=make_project_api_response())
+        handler = MediaHandler(mock_client)
+        event = make_event(
+            event_type="PROJECT_FILE_ADDED",
+            project_id="123",
+            media_id="not-a-number",
+        )
+
+        results = await handler.handle_batch([event])
+
+        # Should not crash, should return a result
+        assert len(results) == 1
+        assert results[0].success is False
+
     async def test_handle_batch_event_without_media_id(self, mock_client):
         mock_client.get_project_media = AsyncMock(return_value=[])
         mock_client.get_project = AsyncMock(return_value=make_project_api_response())
@@ -330,6 +347,39 @@ class TestMediaHandlerProcess:
 
         # Both projects should be processed (2 groups)
         assert result.total >= 1
+
+    async def test_process_group_failure_creates_error_results(self, mock_client):
+        """C2: When a group fails in process(), all events in that group get error results."""
+        call_count = 0
+
+        async def always_fail(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            raise RuntimeError("boom")
+
+        mock_client.get_project_media = AsyncMock(side_effect=always_fail)
+        handler = MediaHandler(mock_client)
+        events = [
+            make_event(
+                event_type="PROJECT_FILE_ADDED",
+                project_id="100",
+                media_id="500",
+                trace_id="evt_1",
+            ),
+            make_event(
+                event_type="PROJECT_FILE_ADDED",
+                project_id="100",
+                media_id="501",
+                trace_id="evt_2",
+            ),
+        ]
+
+        result = await handler.process(events)
+
+        # Both events should be tracked as failed, not silently dropped
+        assert result.total == 2
+        assert result.failed == 2
+        assert result.succeeded == 0
 
     async def test_process_handles_group_exception(self, mock_client):
         call_count = 0
