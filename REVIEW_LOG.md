@@ -128,21 +128,90 @@ Tracking review progress layer-by-layer through the ClaimX pipeline.
 
 ---
 
+### 7. Pipeline Initialization & Orchestration
+- **Reviewed:** 2026-03-05
+- **Files:** `__main__.py`, `runners/common.py`, `runners/registry.py`, `runners/verisk_runners.py`, `runners/plugin_runners.py`, `config/config.py`, `config/pipeline_config.py`
+- **Issues found:** 7 high, 6 medium, 2 low — 15 fixed, 2 skipped (correct as-is)
+- **Tests added:** 4 new tests (`test_common.py`: H1 producer leak, H2 crash log callback; `test_pipeline_config.py`: M4 bool parsing)
+- **Key fixes:**
+  - **H1:** `execute_worker_with_producer` — `worker_class()` raise caused `UnboundLocalError` in finally, leaking producer; init `worker=None`, guard in finally
+  - **H2:** `_enter_worker_error_mode` — crash log upload exception retrieved but never logged; added named callback with `logger.warning`
+  - **H3:** `run_result_processor` — redundant `set_log_context()` + "Starting" log immediately overwritten by `execute_worker_with_producer`; removed
+  - **H4:** `DEFAULT_CONFIG_FILE` in `config.py` — unnecessary `parent.parent` roundtrip; simplified to `Path(__file__).parent / "config.yaml"`
+  - **H5:** `DEFAULT_CONFIG_FILE` duplicated in `pipeline_config.py`; now imports from `config.config`
+  - **H6:** `_get_config_value()` in `pipeline_config.py` duplicated `get_config_value()` with added expansion; consolidated expansion+warning into `config.get_config_value()`, re-exported as alias
+  - **H7:** Redundant `import os` / `from pathlib import Path` inside `_validate_directories()` method body; removed (already at module level)
+  - **M1:** Docstring typo "wcoorkers" → "workers" in `__main__.py`
+  - **M2:** `plugin_runners.py` finally cleanup — one failure skipped remaining cleanups; wrapped each in try/except
+  - **M3:** `claimx_projects_table_path` in common kwargs (worker-specific); moved to `_get_worker_table_paths()` under `claimx-enricher`
+  - **M4:** `enable_delta_writes` only checked `"true"`, not `"1"`/`"yes"`; now uses `_parse_bool_env()`
+  - **M5:** `logging_config: LoggingConfig` with `default_factory=dict` — type mismatch; changed to `dict[str, Any]`
+  - **M6:** `instance_id = str(i)` but type hints say `int | None`; changed to `instance_id = i`
+  - **L2:** Late `import logging` inside `_get_config_value` function body; added module-level logger (consolidated with H6)
+  - **L4:** CLI `Exception` handler duplicated JSON format inline; consolidated into `_handle_cli_error`
+- **Skipped:**
+  - **L1:** `print()` in `verify_storage_permissions` — intentional startup pattern (pre-logging)
+  - **L3:** Task cancel pattern in `run_eventhub_ui` — correct as-is
+
+---
+
+### 8. Logging Infrastructure & ClaimX Observability Review
+- **Reviewed:** 2026-03-05
+- **Scope:** `src/core/logging/`, `src/pipeline/common/logging.py`, `src/pipeline/common/decorators.py`, `src/pipeline/common/eventhub/consumer.py`, `src/pipeline/__main__.py`, and ClaimX `api_client`, `workers`, `handlers`, `retry`, `writers`
+- **Work product:** Review only — no code changes applied in this pass
+- **Assessment:** The project has a strong structured-logging foundation, but the current formatter/schema boundary drops a large amount of ClaimX’s intended operational context before it reaches JSON logs, EventHub, or ADX
+- **Severity summary:** 1 critical, 3 high, 4 medium, 3 low
+
+#### Strengths
+- `core.logging` is directionally strong: JSON logs, structured exceptions, numeric type preservation for ADX, URL sanitization for known URL fields, rotating file logs, and optional EventHub fan-out
+- ClaimX workers consistently emit lifecycle logs (`Initialized`, `Starting`, `Stopping`, shutdown/cleanup, retry/DLQ decisions) and most long-running workers use `PeriodicStatsLogger` for heartbeat-style throughput visibility
+- ClaimX handlers are the most consistent part of the domain: they use `extract_log_context(...)`, include `handler_name`, and usually preserve retryability / API classification well
+- Retry handlers log routing decisions clearly and attach the right business context (`trace_id`, `project_id`, `media_id`, retry counts)
+- EventHub log shipping is reasonably resilient: async queueing, batching, and a circuit breaker keep logging transport failures from blocking worker execution
+
+#### Critical finding
+- **C1 — Structured extras are being silently dropped by the formatter whitelist.** `JSONFormatter` only emits fields named in `EXTRA_FIELDS`, but ClaimX code frequently logs fields outside that schema (`topic`, `partition`, `offset`, `api_url`, `duration_seconds`, `timeout_seconds`, `retry_after_seconds`, `task_count`, `row_count`, `remaining_tasks`, `trace_ids`, etc.). Result: many of the details engineers think they are logging never appear in JSON logs, EventHub logs, or ADX.
+
+#### High-severity findings
+- **H1 — Message transport context is captured but not automatically emitted.** The code has `set_message_context(...)`, `MessageLogContext`, and `set_log_context_from_message`, but `JSONFormatter` injects only `get_log_context()` and never injects `get_message_context()`. Message metadata is therefore available in memory but not reliably present in structured output.
+- **H2 — ClaimX frequently uses non-canonical transport field names.** Several workers log `topic` / `partition` / `offset`, while the formatter only recognizes `message_topic` / `message_partition` / `message_offset`. This makes parse failures and replay investigations materially harder than intended.
+- **H3 — The API client’s most valuable diagnostics are largely lost.** `ClaimXApiClient` logs circuit-open, timeout, connection-error, slow-call, and error-response details, but many of its chosen keys (`api_url`, `duration_seconds`, `timeout_seconds`, `retry_after_seconds`, `is_retryable`, `has_params`, `has_body`) are not in the formatter schema. The result is much weaker API observability than the source code suggests.
+
+#### Medium-severity findings
+- **M1 — Startup/EventHub internals bypass structured logging.** `core.logging.setup`, `core.logging.eventhub_handler`, and `pipeline.__main__` use `print(...)` for startup and EventHub status. Those messages do not flow through the JSON formatter, do not inherit context, and do not reach ADX through the normal handler chain.
+- **M2 — The ClaimX domain has no enforced shared log schema above the formatter layer.** Workers, handlers, retry components, and the API client all log rich context, but field naming is ad hoc. Without a canonical schema/constants module, drift is already visible across `api_client.py`, `download_worker.py`, `upload_worker.py`, `result_processor.py`, and `event_ingester.py`.
+- **M3 — Some logged payloads are high-cardinality and potentially sensitive.** Examples include `response_body`, file paths (`local_path`, `cache_path`, `destination_path`), and download URLs. Known URL fields are sanitized, but response bodies are only truncated, not redacted/classified, which is risky if ClaimX returns customer or claim details.
+- **M4 — A few shared logging helpers are transport-stale.** `log_worker_startup(...)` is still Kafka-centric even though the project has standardized on EventHub for transport; this increases the odds of misleading startup diagnostics if reused.
+
+#### Low-severity findings
+- **L1 — Root logger setup is intentionally global and invasive.** `_reset_root_logger()` clears handlers on the root logger (except pytest handlers). That is acceptable for the current CLI/worker model, but it makes the logging stack harder to embed in a larger host process.
+- **L2 — Logger naming is slightly inconsistent.** Most ClaimX code uses module loggers via `logging.getLogger(__name__)`, while some writer code uses class-name loggers. This is not harmful, but it makes cross-component query patterns less uniform.
+- **L3 — Some human-readable logs duplicate structured data in the message text.** This is fine for console readability, but it reduces the signal-to-noise ratio when operators rely primarily on machine-parsed logs.
+
+#### ClaimX domain review by area
+- **API client:** Good intent and good classification semantics; current value is capped by formatter/schema mismatch. The client is trying to surface slow calls, circuit state, retryability, and HTTP context, but much of that never survives serialization.
+- **Workers:** Operationally mature in shape — startup/shutdown, periodic stats, retry paths, and batch outcomes are all covered. The main weakness is inconsistent field naming and over-reliance on extras that the formatter discards.
+- **Handlers:** Best overall logging quality in the domain. They consistently attach business identifiers via `extract_log_context(...)`, and their `warning` vs `error` usage is generally sensible.
+- **Retry handlers:** Clear, useful decision logging. These are close to production-ready from a logging perspective.
+- **Result/delta/write path:** Lifecycle logging is adequate, but inventory/batch flush logs suffer from the same schema-drop problem as the rest of ClaimX.
+
+#### Most important recommendations
+1. **Fix the schema boundary first.** Either inject all non-reserved `LogRecord` extras by default, or maintain a canonical schema module and align every producer to it. Silent dropping is the single biggest observability defect in the current design.
+2. **Inject message context automatically in the formatter.** `message_topic`, `message_partition`, `message_offset`, `message_key`, and `message_consumer_group` should flow from contextvars without each worker having to remember bespoke extras.
+3. **Standardize ClaimX field names.** Normalize on keys such as `duration_ms`, `message_topic`, `message_partition`, `message_offset`, `retry_after_seconds`, `timeout_seconds`, `task_count`, and `row_count`, and add tests that assert those fields survive JSON formatting.
+4. **Stop using `print(...)` for operational logging after bootstrap.** Route startup/EventHub status through the logger once handlers exist so file logs and EventHub logs tell the same story.
+5. **Audit sensitive/high-cardinality fields.** Keep sanitizing URLs, but also define policy for `response_body`, filesystem paths, and any claim/customer content before expanding the formatter schema.
+
+#### Overall conclusion
+- The project already has the right primitives for high-quality observability.
+- The largest gap is not missing log statements; it is that the logging contract between producers and the JSON formatter is inconsistent and currently drops too much of ClaimX’s intended diagnostic context.
+- Once that contract is fixed, ClaimX’s worker/handler logging should become substantially more useful without requiring a large volume of new log statements.
+
+---
+
 ## Up Next
 
-### 7. Pipeline Initialization & Orchestration
-- `src/pipeline/__main__.py` — Entry point: arg parsing, env setup, logging, signal handlers, worker startup
-- `src/pipeline/__init__.py` — Package docs, version
-- `src/pipeline/runners/registry.py` — Worker registry (CLI name → runner function mapping)
-- `src/pipeline/runners/common.py` — Shared execution patterns (shutdown handling, retry, error mode)
-- `src/pipeline/runners/claimx_runners.py` — ClaimX worker runners
-- `src/pipeline/runners/verisk_runners.py` — XACT/Verisk worker runners
-- `src/pipeline/runners/plugin_runners.py` — Plugin runners (iTel Cabinet, EventHub UI)
-- `src/config/__init__.py` — Config API (singleton, YAML loading)
-- `src/config/config.py` — Core config classes, env var expansion
-- `src/config/pipeline_config.py` — EventHub + Delta Lake path configuration
-
-### 8. Shared Infrastructure (`src/pipeline/common/`)
+### 9. Shared Infrastructure (`src/pipeline/common/`)
 - EventHub consumer/producer
 - Delta Lake storage
 - OneLake storage
