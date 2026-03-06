@@ -33,10 +33,10 @@
         </div>
         <div class="form-group">
             <label>Count</label>
-            <input type="range" id="count-slider" min="1" max="100" value="10" style="width: 120px; vertical-align: middle;">
-            <span id="count-label" class="mono" style="font-size: 0.8rem;">10</span>
+            <input type="number" id="count-input" min="1" max="5000" value="10" style="width: 80px;">
         </div>
         <button type="button" class="btn btn-primary" onclick="fetchMessages()">Fetch</button>
+        <button type="button" class="btn" onclick="exportCsv()">Export CSV</button>
         <label style="font-size: 0.8rem; color: var(--text-muted); cursor: pointer;">
             <input type="checkbox" id="auto-refresh"> Auto-refresh
         </label>
@@ -48,21 +48,24 @@
 </div>
 
 <script>
-    const slider = document.getElementById('count-slider');
-    const label = document.getElementById('count-label');
-    slider.addEventListener('input', function() { label.textContent = this.value; });
-
     let refreshTimer = null;
 
-    function fetchMessages() {
+    function getParams() {
         const partition = document.getElementById('partition-select').value;
         const startTime = document.getElementById('start-time').value;
-        const count = slider.value;
+        const count = document.getElementById('count-input').value;
+        let qs = 'partition=' + partition + '&count=' + count;
+        if (startTime) qs += '&start_time=' + encodeURIComponent(startTime);
+        return qs;
+    }
 
-        let url = '/messages/{{ hub.eventhub_name }}/fetch?partition=' + partition + '&count=' + count;
-        if (startTime) url += '&start_time=' + encodeURIComponent(startTime);
+    function fetchMessages() {
+        htmx.ajax('GET', '/messages/{{ hub.eventhub_name }}/fetch?' + getParams(),
+            {target: '#messages-container', swap: 'innerHTML'});
+    }
 
-        htmx.ajax('GET', url, {target: '#messages-container', swap: 'innerHTML'});
+    function exportCsv() {
+        window.location = '/messages/{{ hub.eventhub_name }}/export-csv?' + getParams();
     }
 
     document.getElementById('auto-refresh').addEventListener('change', function() {

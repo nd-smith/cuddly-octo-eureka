@@ -82,7 +82,7 @@ async def checkpoints_advance(
     try:
         conn_str = conn_str_for_hub(hub)
         fqdn = extract_fqdn(conn_str)
-        changes = advance_checkpoints_to_latest(
+        changes = await advance_checkpoints_to_latest(
             conn_str=conn_str,
             eventhub_name=eventhub_name,
             consumer_group=consumer_group,

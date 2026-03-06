@@ -67,7 +67,7 @@ def list_checkpoints(
     )
 
 
-def advance_checkpoints_to_latest(
+async def advance_checkpoints_to_latest(
     conn_str: str,
     eventhub_name: str,
     consumer_group: str,
@@ -77,13 +77,7 @@ def advance_checkpoints_to_latest(
     ssl_kwargs: dict | None = None,
 ) -> dict[str, dict]:
     """Advance all checkpoints to the latest offset. Returns {partition_id: {old, new}}."""
-    loop = asyncio.new_event_loop()
-    try:
-        offsets = loop.run_until_complete(
-            _get_latest_offsets(conn_str, eventhub_name, ssl_kwargs)
-        )
-    finally:
-        loop.close()
+    offsets = await _get_latest_offsets(conn_str, eventhub_name, ssl_kwargs)
 
     return _update_checkpoint_blobs(
         blob_conn_str,
