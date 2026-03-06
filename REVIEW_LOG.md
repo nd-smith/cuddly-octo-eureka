@@ -239,12 +239,36 @@ Tracking review progress layer-by-layer through the ClaimX pipeline.
 
 ---
 
+### 9B. Shared Infrastructure — Storage, Metrics & Monitoring (`src/pipeline/common/`)
+- **Reviewed:** 2026-03-05
+- **Scope:** Delta Lake storage, OneLake storage, metrics, health, and monitoring modules (~10K lines source + tests)
+- **Files modified:** `metrics.py`, `monitoring_service.py`, `monitoring.py`, `health.py`, `storage/onelake.py`, `storage/delta.py`
+- **Issues found:** 1 high, 4 medium, 5 low — 9 fixed, 1 deferred (unused `message_bytes` params)
+- **Tests added/updated:** 4 new tests, 1 updated mock
+- **Key fixes:**
+  - **H1:** `_create_counter/gauge/histogram` duplicate-metric fallback used wrong registry API (`_collector_to_names` with tuple key) — changed to `_names_to_collectors` with string key; without this fix, duplicate registrations always returned `NoOpMetric()`, silently losing all metrics
+  - **M1:** `update_disk_usage()` — `usage.used / usage.total` raised `ZeroDivisionError` when `total=0`; added `if usage.total > 0:` guard
+  - **M2:** `MonitoringService.start()` — `web.AppRunner` was a local variable with no cleanup path; stored as `self._runner`, added `stop()` method
+  - **M3:** `MonitoringServer.start()` — if `site.start()` raised after `runner.setup()`, the runner leaked; wrapped in try/except with cleanup
+  - **M4:** `HealthCheckServer.stop()` — `self._thread` not reset to `None` after join; added reset for clean restart state
+  - **L1:** Unbounded `_write_tokens` dict in `OneLakeClient` — added eviction at 10,000 entries (oldest by timestamp)
+  - **L2:** Dead `resource` import/call in `get_open_file_descriptors()` fallback — removed (just returns `-1`)
+  - **L3:** f-string in `logger.error()` in `monitoring_service.py` — converted to lazy `%s` formatting
+  - **L4:** 8 f-string logger calls in `health.py` — all converted to lazy `%s` formatting
+- **Deferred:**
+  - **L5:** `record_message_produced()` and `record_message_consumed()` accept unused `message_bytes` — ~15 callers across pipeline-specific files; out of scope for shared infra pass
+- **Test updates:**
+  - Updated `test_metrics.py` mock from `_collector_to_names` with tuple key to `_names_to_collectors` with string key
+  - Added `test_update_disk_usage_handles_zero_total` for `ZeroDivisionError` guard
+  - Added `TestMonitoringServiceStop` with runner cleanup and noop tests
+  - Added `test_record_token_evicts_oldest_when_limit_exceeded` for write token eviction
+
+---
+
 ## Up Next
 
-### 9B. Shared Infrastructure — Remaining (`src/pipeline/common/`)
-- Delta Lake storage
-- OneLake storage
-- Metrics, health, monitoring
+### 10. Verisk Pipeline
+- Handlers, workers, schemas, writers, retry
 
 ---
 

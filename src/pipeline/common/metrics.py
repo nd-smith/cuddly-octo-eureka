@@ -86,7 +86,7 @@ def _create_counter(name: str, description: str, labelnames=None):
             name, description, labelnames=labelnames or [], registry=registry
         )
     except ValueError:
-        return registry._collector_to_names.get((name,), NoOpMetric())
+        return registry._names_to_collectors.get(name, NoOpMetric())
 
 
 def _create_gauge(name: str, description: str, labelnames=None):
@@ -103,7 +103,7 @@ def _create_gauge(name: str, description: str, labelnames=None):
             name, description, labelnames=labelnames or [], registry=registry
         )
     except ValueError:
-        return registry._collector_to_names.get((name,), NoOpMetric())
+        return registry._names_to_collectors.get(name, NoOpMetric())
 
 
 def _create_histogram(name: str, description: str, labelnames=None, buckets=None):
@@ -126,7 +126,7 @@ def _create_histogram(name: str, description: str, labelnames=None, buckets=None
             kwargs["buckets"] = buckets
         return _prometheus_client.Histogram(**kwargs)
     except ValueError:
-        return registry._collector_to_names.get((name,), NoOpMetric())
+        return registry._names_to_collectors.get(name, NoOpMetric())
 
 
 # =============================================================================
@@ -389,7 +389,8 @@ def update_disk_usage(path: str) -> None:
         usage = shutil.disk_usage(path)
         disk_usage_bytes_gauge.labels(path=path).set(usage.used)
         disk_available_bytes_gauge.labels(path=path).set(usage.free)
-        disk_usage_ratio_gauge.labels(path=path).set(usage.used / usage.total)
+        if usage.total > 0:
+            disk_usage_ratio_gauge.labels(path=path).set(usage.used / usage.total)
     except OSError:
         pass
 

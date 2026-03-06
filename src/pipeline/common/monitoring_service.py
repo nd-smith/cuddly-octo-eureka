@@ -153,6 +153,7 @@ class MonitoringService:
         """
         self.prometheus = prometheus_client
         self.port = port
+        self._runner: web.AppRunner | None = None
         self.app = self._create_app()
 
     def _create_app(self) -> web.Application:
@@ -361,13 +362,13 @@ class MonitoringService:
 
     async def start(self) -> None:
         """Start the monitoring service."""
-        runner = web.AppRunner(self.app)
-        await runner.setup()
-        site = web.TCPSite(runner, "0.0.0.0", self.port)
+        self._runner = web.AppRunner(self.app)
+        await self._runner.setup()
+        site = web.TCPSite(self._runner, "0.0.0.0", self.port)
         await site.start()
 
         logger.info(
-            f"Monitoring service started on port {self.port}",
+            "Monitoring service started on port %s", self.port,
             extra={
                 "port": self.port,
                 "endpoints": [
@@ -378,6 +379,13 @@ class MonitoringService:
                 ],
             },
         )
+
+    async def stop(self) -> None:
+        """Stop the monitoring service and clean up the runner."""
+        if self._runner is not None:
+            await self._runner.cleanup()
+            self._runner = None
+            logger.info("Monitoring service stopped")
 
 
 async def main():
@@ -404,8 +412,8 @@ async def main():
     logger.info("Connecting to Prometheus at %s", args.prometheus_url)
     if not await prometheus.check_prometheus_health():
         logger.error(
-            f"Cannot connect to Prometheus at {args.prometheus_url}. "
-            "Make sure Prometheus is running."
+            "Cannot connect to Prometheus at %s. Make sure Prometheus is running.",
+            args.prometheus_url,
         )
         await prometheus.close()
         return

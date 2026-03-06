@@ -488,6 +488,29 @@ class TestOneLakeClientIdempotency:
         client._record_token(op)
         assert client._write_tokens["token-2"] is op
 
+    def test_record_token_evicts_oldest_when_limit_exceeded(self):
+        client = OneLakeClient(VALID_BASE_PATH)
+        base_time = datetime(2026, 1, 1, tzinfo=UTC)
+
+        # Fill to the limit
+        for i in range(OneLakeClient._WRITE_TOKEN_LIMIT):
+            op = WriteOperation(
+                f"tok-{i}", f"path-{i}", base_time + timedelta(seconds=i), 10
+            )
+            client._record_token(op)
+
+        assert len(client._write_tokens) == OneLakeClient._WRITE_TOKEN_LIMIT
+
+        # Add one more — should evict the oldest (tok-0)
+        new_op = WriteOperation(
+            "tok-new", "path-new", base_time + timedelta(seconds=999999), 10
+        )
+        client._record_token(new_op)
+
+        assert len(client._write_tokens) <= OneLakeClient._WRITE_TOKEN_LIMIT
+        assert "tok-0" not in client._write_tokens
+        assert "tok-new" in client._write_tokens
+
 
 # ---------------------------------------------------------------------------
 # OneLakeClient - pool stats

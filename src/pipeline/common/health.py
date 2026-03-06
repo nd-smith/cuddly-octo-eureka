@@ -115,12 +115,14 @@ class HealthCheckServer:
 
         if self._enabled:
             logger.info(
-                f"Initialized HealthCheckServer for {worker_name}",
+                "Initialized HealthCheckServer for %s",
+                worker_name,
                 extra={"port": port, "worker_name": worker_name},
             )
         else:
             logger.info(
-                f"HealthCheckServer disabled for {worker_name}",
+                "HealthCheckServer disabled for %s",
+                worker_name,
                 extra={"worker_name": worker_name},
             )
 
@@ -155,7 +157,8 @@ class HealthCheckServer:
 
             if old_ready != self._ready:
                 logger.info(
-                    f"Readiness status changed: {old_ready} -> {self._ready}",
+                    "Readiness status changed: %s -> %s",
+                    old_ready, self._ready,
                     extra={
                         "worker_name": self.worker_name,
                         "transport_connected": transport_connected,
@@ -179,7 +182,8 @@ class HealthCheckServer:
             self._error_message = error_message
             self._ready = False
             logger.error(
-                f"Health check error state set: {error_message}",
+                "Health check error state set: %s",
+                error_message,
                 extra={
                     "worker_name": self.worker_name,
                     "error": error_message,
@@ -367,7 +371,8 @@ class HealthCheckServer:
 
         except Exception as e:
             logger.error(
-                f"Health server thread error: {e}",
+                "Health server thread error: %s",
+                e,
                 extra={"worker_name": self.worker_name},
                 exc_info=True,
             )
@@ -393,7 +398,8 @@ class HealthCheckServer:
                 self._server_started.set()
             elif self.port != 0 and await self._try_start_on_port(0):
                 logger.warning(
-                    f"Port {self.port} in use, falling back to dynamic port assignment",
+                    "Port %s in use, falling back to dynamic port assignment",
+                    self.port,
                     extra={"worker_name": self.worker_name, "original_port": self.port},
                 )
                 logger.info(
@@ -508,7 +514,8 @@ class HealthCheckServer:
 
         except Exception as e:
             logger.error(
-                f"Failed to start health check server: {e}",
+                "Failed to start health check server: %s",
+                e,
                 extra={"worker_name": self.worker_name, "port": self.port},
                 exc_info=True,
             )
@@ -547,6 +554,7 @@ class HealthCheckServer:
                 )
 
             # Reset state for potential restart
+            self._thread = None
             self._actual_port = None
             self._thread_ready.clear()
             self._server_started.clear()
@@ -554,7 +562,8 @@ class HealthCheckServer:
 
         except Exception as e:
             logger.error(
-                f"Error stopping health check server: {e}",
+                "Error stopping health check server: %s",
+                e,
                 extra={"worker_name": self.worker_name},
                 exc_info=True,
             )

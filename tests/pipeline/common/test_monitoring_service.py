@@ -670,3 +670,29 @@ class TestMonitoringServiceInit:
         prom = _make_mock_prometheus()
         service = MonitoringService(prom)
         assert service.prometheus is prom
+
+    def test_runner_initialized_to_none(self):
+        prom = _make_mock_prometheus()
+        service = MonitoringService(prom)
+        assert service._runner is None
+
+
+class TestMonitoringServiceStop:
+    async def test_stop_cleans_up_runner(self):
+        prom = _make_mock_prometheus()
+        service = MonitoringService(prom, port=0)
+        mock_runner = AsyncMock()
+        service._runner = mock_runner
+
+        await service.stop()
+
+        mock_runner.cleanup.assert_awaited_once()
+        assert service._runner is None
+
+    async def test_stop_noop_when_no_runner(self):
+        prom = _make_mock_prometheus()
+        service = MonitoringService(prom, port=0)
+
+        # Should not raise
+        await service.stop()
+        assert service._runner is None

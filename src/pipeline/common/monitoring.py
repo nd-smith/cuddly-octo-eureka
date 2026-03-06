@@ -458,8 +458,13 @@ class MonitoringServer:
         self._app = self.create_app()
         self._runner = web.AppRunner(self._app)
         await self._runner.setup()
-        site = web.TCPSite(self._runner, "0.0.0.0", self.port)
-        await site.start()
+        try:
+            site = web.TCPSite(self._runner, "0.0.0.0", self.port)
+            await site.start()
+        except Exception:
+            await self._runner.cleanup()
+            self._runner = None
+            raise
         logger.info("Monitoring server started on http://localhost:%s", self.port)
 
     async def stop(self) -> None:

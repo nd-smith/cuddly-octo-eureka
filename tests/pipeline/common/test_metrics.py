@@ -227,7 +227,7 @@ class TestMetricCreation:
         """_create_counter returns existing counter on duplicate registration."""
         mock_registry = Mock()
         mock_existing_counter = Mock()
-        mock_registry._collector_to_names = {("test_counter",): mock_existing_counter}
+        mock_registry._names_to_collectors = {"test_counter": mock_existing_counter}
 
         mock_counter_class = Mock()
         mock_counter_class.side_effect = ValueError("Duplicate metric")
@@ -613,6 +613,44 @@ class TestConvenienceFunctions:
 
             mock_ratio_gauge.labels.assert_called_once_with(path="/ad/nas/verisk/tmp")
             mock_ratio_labels.set.assert_called_once_with(0.6)
+
+    def test_update_disk_usage_handles_zero_total(self):
+        """update_disk_usage handles total=0 without ZeroDivisionError."""
+        mock_usage_gauge = Mock()
+        mock_usage_labels = Mock()
+        mock_usage_gauge.labels.return_value = mock_usage_labels
+
+        mock_available_gauge = Mock()
+        mock_available_labels = Mock()
+        mock_available_gauge.labels.return_value = mock_available_labels
+
+        mock_ratio_gauge = Mock()
+        mock_ratio_labels = Mock()
+        mock_ratio_gauge.labels.return_value = mock_ratio_labels
+
+        mock_disk_usage = Mock(total=0, used=0, free=0)
+
+        with (
+            patch("pipeline.common.metrics.disk_usage_bytes_gauge", mock_usage_gauge),
+            patch(
+                "pipeline.common.metrics.disk_available_bytes_gauge",
+                mock_available_gauge,
+            ),
+            patch("pipeline.common.metrics.disk_usage_ratio_gauge", mock_ratio_gauge),
+            patch(
+                "pipeline.common.metrics.shutil.disk_usage",
+                return_value=mock_disk_usage,
+            ),
+        ):
+            from pipeline.common.metrics import update_disk_usage
+
+            # Should not raise ZeroDivisionError
+            update_disk_usage("/pseudo/fs")
+
+            mock_usage_labels.set.assert_called_once_with(0)
+            mock_available_labels.set.assert_called_once_with(0)
+            # Ratio gauge should NOT be set when total is 0
+            mock_ratio_labels.set.assert_not_called()
 
     def test_update_disk_usage_handles_oserror(self):
         """update_disk_usage silently handles OSError for missing paths."""

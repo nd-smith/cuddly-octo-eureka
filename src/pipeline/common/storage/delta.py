@@ -54,11 +54,6 @@ def get_open_file_descriptors() -> int:
         if os.path.exists(fd_dir):
             return len(os.listdir(fd_dir))
 
-        # Fallback: try to count via resource module (less accurate but portable)
-        import resource
-
-        soft_limit, hard_limit = resource.getrlimit(resource.RLIMIT_NOFILE)
-        # We can't easily count open FDs on all platforms, return -1 to indicate unknown
         return -1
     except Exception as e:
         logger.debug("Could not get file descriptor count: %s", e)

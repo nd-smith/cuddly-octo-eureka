@@ -585,8 +585,17 @@ class OneLakeClient:
         """Check if write operation with this token was already completed (Task G.3b)."""
         return operation_token in self._write_tokens
 
+    _WRITE_TOKEN_LIMIT = 10_000
+
     def _record_token(self, write_op: WriteOperation) -> None:
         """Record write operation token for idempotency tracking (Task G.3b)."""
+        if len(self._write_tokens) >= self._WRITE_TOKEN_LIMIT:
+            # Evict oldest entries by timestamp
+            sorted_tokens = sorted(
+                self._write_tokens, key=lambda k: self._write_tokens[k].timestamp
+            )
+            for token in sorted_tokens[: len(self._write_tokens) - self._WRITE_TOKEN_LIMIT + 1]:
+                del self._write_tokens[token]
         self._write_tokens[write_op.token] = write_op
         logger.debug(
             "Recorded write operation token",
