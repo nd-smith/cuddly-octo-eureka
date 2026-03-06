@@ -17,16 +17,20 @@ class EventHubInfo:
     is_source: bool  # True if this is a source (external) namespace hub
 
 
-def load_eventhub_config() -> dict[str, Any]:
-    """Load the raw eventhub section from config.yaml with env var expansion."""
+def _load_full_config() -> dict[str, Any]:
+    """Load the full config.yaml with env var expansion."""
     from config.config import DEFAULT_CONFIG_FILE, _expand_env_vars, load_yaml
 
     if not DEFAULT_CONFIG_FILE.exists():
         return {}
 
     data = load_yaml(DEFAULT_CONFIG_FILE)
-    data = _expand_env_vars(data)
-    return data.get("eventhub", {})
+    return _expand_env_vars(data)
+
+
+def load_eventhub_config() -> dict[str, Any]:
+    """Load the raw eventhub section from config.yaml with env var expansion."""
+    return _load_full_config().get("eventhub", {})
 
 
 def get_namespace_connection_string() -> str:
@@ -132,7 +136,8 @@ def _extract_hubs(
 
 def list_eventhubs() -> list[EventHubInfo]:
     """Extract all EventHub definitions from config.yaml."""
-    config = load_eventhub_config()
+    full_config = _load_full_config()
+    config = full_config.get("eventhub", {})
 
     # Internal domains: verisk, claimx, plugins
     internal_skip = {
@@ -155,6 +160,18 @@ def list_eventhubs() -> list[EventHubInfo]:
             is_source=True,
         )
     )
+
+    # Application logs EventHub (from logging.eventhub_logging section)
+    eh_logging = full_config.get("logging", {}).get("eventhub_logging", {})
+    log_hub_name = eh_logging.get("eventhub_name")
+    if log_hub_name:
+        hubs.append(EventHubInfo(
+            domain="logging",
+            topic_key="application_logs",
+            eventhub_name=log_hub_name,
+            consumer_groups={},
+            is_source=False,
+        ))
 
     return hubs
 
