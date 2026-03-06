@@ -167,14 +167,32 @@ async def _find_offsets_at_time(
             if props["is_empty"]:
                 continue
 
-            batch = await client.receive_batch(
-                partition_id=pid,
-                max_batch_size=1,
-                max_wait_time=10,
-                starting_position=target_time,
-                starting_position_inclusive=True,
+            first_event = None
+            done = asyncio.Event()
+
+            async def on_event_batch(partition_context, events):
+                nonlocal first_event
+                if events and first_event is None:
+                    first_event = events[0]
+                done.set()
+
+            receive_task = asyncio.create_task(
+                client.receive_batch(
+                    on_event_batch=on_event_batch,
+                    partition_id=pid,
+                    max_batch_size=1,
+                    max_wait_time=10,
+                    starting_position=target_time,
+                    starting_position_inclusive=True,
+                )
             )
-            first_event = batch[0] if batch else None
+
+            await done.wait()
+            receive_task.cancel()
+            try:
+                await receive_task
+            except asyncio.CancelledError:
+                pass
 
             if first_event:
                 results[pid] = {

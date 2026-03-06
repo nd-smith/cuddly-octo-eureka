@@ -1,5 +1,6 @@
 """Sample recent messages from an EventHub partition."""
 
+import asyncio
 import json
 from dataclasses import dataclass
 from datetime import datetime
@@ -76,21 +77,33 @@ async def sample_messages(
             position = starting_position
             inclusive = False
 
-        received = []
+        received: list = []
+        done = asyncio.Event()
 
-        while len(received) < count:
-            batch = await client.receive_batch(
+        async def on_event_batch(partition_context, events):
+            if not events:
+                done.set()
+                return
+            received.extend(events)
+            if len(received) >= count:
+                done.set()
+
+        receive_task = asyncio.create_task(
+            client.receive_batch(
+                on_event_batch=on_event_batch,
                 partition_id=partition_id,
-                max_batch_size=count - len(received),
+                max_batch_size=count,
                 max_wait_time=10,
                 starting_position=position,
                 starting_position_inclusive=inclusive,
             )
-            if not batch:
-                break
-            received.extend(batch)
-            # Advance position past last received event
-            position = received[-1].sequence_number
-            inclusive = False
+        )
+
+        await done.wait()
+        receive_task.cancel()
+        try:
+            await receive_task
+        except asyncio.CancelledError:
+            pass
 
     return [_format_event(event) for event in received[:count]]
