@@ -1,6 +1,7 @@
 """Context variables for structured logging."""
 
 from contextvars import ContextVar
+from typing import Any
 
 # Pipeline execution context
 _cycle_id: ContextVar[str] = ContextVar("cycle_id", default="")
@@ -87,7 +88,7 @@ def set_message_context(
         _message_consumer_group.set(consumer_group)
 
 
-def get_message_context() -> dict[str, any]:
+def get_message_context() -> dict[str, Any]:
     context = {
         "message_topic": _message_topic.get(),
         "message_partition": _message_partition.get(),

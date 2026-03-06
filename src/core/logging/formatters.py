@@ -184,7 +184,8 @@ class JSONFormatter(logging.Formatter):
                 "password",
                 "secret",
                 "token",
-                "auth",
+                "auth_header",
+                "authorization",
                 "connection_string",
                 "sharedaccesskey",
             )
