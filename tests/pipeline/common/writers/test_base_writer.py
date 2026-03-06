@@ -417,9 +417,9 @@ class TestConfigureObjectStoreTimeouts:
 
         _configure_object_store_timeouts()
 
-        assert os.environ["AZURE_STORAGE_MAX_RETRIES"] == "3"
-        assert os.environ["AZURE_STORAGE_RETRY_TIMEOUT"] == "60"
-        assert os.environ["OBJECT_STORE_REQUEST_TIMEOUT"] == "60"
+        assert os.environ["AZURE_STORAGE_MAX_RETRIES"] == "2"
+        assert os.environ["AZURE_STORAGE_RETRY_TIMEOUT"] == "30"
+        assert os.environ["OBJECT_STORE_REQUEST_TIMEOUT"] == "30"
 
     def test_does_not_override_existing(self):
         """_configure_object_store_timeouts respects existing env vars."""

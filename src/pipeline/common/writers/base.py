@@ -39,10 +39,15 @@ def _configure_object_store_timeouts() -> None:
     list/get operations indefinitely when Azure returns malformed XML responses
     (e.g. ``ill-formed document: start tag not closed``), causing the subprocess
     to hang until the asyncio timeout kills it.
+
+    Budget:  each request ≤30 s  ×  2 retries  =  ≤90 s worst-case Rust time.
+    The Python ``@with_retry`` on ``DeltaTableWriter.merge()`` adds up to 2 more
+    attempts with 1-10 s backoff, but the 300 s ``SUBPROCESS_TIMEOUT_SECONDS``
+    acts as a hard ceiling so total wall-clock never exceeds 5 min.
     """
-    os.environ.setdefault("AZURE_STORAGE_MAX_RETRIES", "3")
-    os.environ.setdefault("AZURE_STORAGE_RETRY_TIMEOUT", "60")
-    os.environ.setdefault("OBJECT_STORE_REQUEST_TIMEOUT", "60")
+    os.environ.setdefault("AZURE_STORAGE_MAX_RETRIES", "2")
+    os.environ.setdefault("AZURE_STORAGE_RETRY_TIMEOUT", "30")
+    os.environ.setdefault("OBJECT_STORE_REQUEST_TIMEOUT", "30")
 
 
 def _subprocess_delta_append(
