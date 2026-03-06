@@ -85,3 +85,43 @@ class TestGenerateBlobPath:
     def test_missing_file_name_uses_media_id(self):
         row = {"project_id": "p1", "media_id": "m42"}
         assert _generate_blob_path(row) == "p1/media/media_m42"
+
+
+class TestEmptyMediaIdSkipped:
+    """Test M5 fix: empty media_id rows are skipped."""
+
+    def test_empty_media_id_skipped_with_warning(self):
+        rows = [
+            {
+                "media_id": "",
+                "project_id": "p1",
+                "full_download_link": "https://s3.example.com/file.pdf",
+                "file_type": "pdf",
+                "file_name": "file.pdf",
+                "trace_id": "t1",
+            },
+            {
+                "media_id": "m1",
+                "project_id": "p1",
+                "full_download_link": "https://s3.example.com/file2.pdf",
+                "file_type": "pdf",
+                "file_name": "file2.pdf",
+                "trace_id": "t1",
+            },
+        ]
+        tasks = create_download_tasks_from_media(rows)
+        assert len(tasks) == 1
+        assert tasks[0].media_id == "m1"
+
+    def test_missing_media_id_key_skipped(self):
+        rows = [
+            {
+                "project_id": "p1",
+                "full_download_link": "https://s3.example.com/file.pdf",
+                "file_type": "pdf",
+                "file_name": "file.pdf",
+                "trace_id": "t1",
+            },
+        ]
+        tasks = create_download_tasks_from_media(rows)
+        assert len(tasks) == 0

@@ -26,6 +26,14 @@ def create_download_tasks_from_media(
     download_tasks = []
 
     for media_row in media_rows:
+        media_id = str(media_row.get("media_id", ""))
+        if not media_id:
+            logger.warning(
+                "Skipping media row with empty media_id",
+                extra={"project_id": media_row.get("project_id")},
+            )
+            continue
+
         download_url = media_row.get("full_download_link")
         if not download_url:
             logger.debug(
@@ -38,7 +46,7 @@ def create_download_tasks_from_media(
             continue
 
         task = ClaimXDownloadTask(
-            media_id=str(media_row.get("media_id", "")),
+            media_id=media_id,
             project_id=str(media_row.get("project_id", "")),
             download_url=download_url,
             blob_path=_generate_blob_path(media_row),

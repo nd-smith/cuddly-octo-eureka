@@ -21,6 +21,8 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from config.config import MessageConfig
+from core.errors.exceptions import PermanentError
+from core.types import ErrorCategory
 from pipeline.claimx.schemas.entities import EntityRowsMessage
 from pipeline.claimx.workers.entity_delta_worker import ClaimXEntityDeltaWorker
 from pipeline.common.types import PipelineMessage
@@ -264,8 +266,8 @@ class TestEntityDeltaWorkerMessageProcessing:
         assert len(worker._batch) == 1
 
     @pytest.mark.asyncio
-    async def test_invalid_json_increments_failed(self, mock_config):
-        """Worker handles invalid JSON gracefully."""
+    async def test_invalid_json_raises_permanent_error(self, mock_config):
+        """Worker raises PermanentError on invalid JSON (C2 fix)."""
         worker = ClaimXEntityDeltaWorker(
             config=mock_config,
             projects_table_path="abfss://test/projects",
@@ -288,7 +290,8 @@ class TestEntityDeltaWorkerMessageProcessing:
         )
 
         with patch("pipeline.claimx.workers.entity_delta_worker.log_worker_error"):
-            await worker._handle_message(invalid_message)
+            with pytest.raises(PermanentError):
+                await worker._handle_message(invalid_message)
 
         # Verify error was tracked
         assert worker._records_failed == 1
@@ -445,3 +448,58 @@ class TestEntityDeltaWorkerDeltaWrites:
 
         # Verify no writes occurred
         assert worker._batches_written == 0
+
+    @pytest.mark.asyncio
+    async def test_flush_batch_clears_batch_without_dead_copy(self, mock_config, sample_entity_rows):
+        """Flush batch clears batch directly without dead .copy() call (C1 fix)."""
+        worker = ClaimXEntityDeltaWorker(
+            config=mock_config,
+            projects_table_path="abfss://test/projects",
+            contacts_table_path="abfss://test/contacts",
+            media_table_path="abfss://test/media",
+            tasks_table_path="abfss://test/tasks",
+            task_templates_table_path="abfss://test/task_templates",
+            external_links_table_path="abfss://test/external_links",
+            video_collab_table_path="abfss://test/video_collab",
+        )
+
+        worker.entity_writer = AsyncMock()
+        worker.entity_writer.write_all = AsyncMock(return_value={"projects": 1})
+        worker._consumer = AsyncMock()
+        worker._consumer.commit = AsyncMock()
+
+        worker._batch = [sample_entity_rows]
+
+        await worker._flush_batch()
+
+        # Batch should be cleared after flush
+        assert len(worker._batch) == 0
+
+    @pytest.mark.asyncio
+    async def test_handle_flush_error_passes_category_value_to_retry(self, mock_config, sample_entity_rows):
+        """_handle_flush_error passes error_category.value (str) to retry handler (M3 fix)."""
+        worker = ClaimXEntityDeltaWorker(
+            config=mock_config,
+            projects_table_path="abfss://test/projects",
+            contacts_table_path="abfss://test/contacts",
+            media_table_path="abfss://test/media",
+            tasks_table_path="abfss://test/tasks",
+            task_templates_table_path="abfss://test/task_templates",
+            external_links_table_path="abfss://test/external_links",
+            video_collab_table_path="abfss://test/video_collab",
+        )
+
+        worker.retry_handler = AsyncMock()
+        worker.retry_handler.classify_delta_error = Mock(return_value=ErrorCategory.TRANSIENT)
+        worker.retry_handler.handle_batch_failure = AsyncMock()
+
+        error = Exception("connection timeout")
+        merged_rows = sample_entity_rows
+
+        with patch("pipeline.claimx.workers.entity_delta_worker.log_worker_error"):
+            await worker._handle_flush_error(error, merged_rows, batch_size=1)
+
+        # Verify error_category passed as string value, not enum
+        call_kwargs = worker.retry_handler.handle_batch_failure.call_args.kwargs
+        assert call_kwargs["error_category"] == "transient"
+        assert isinstance(call_kwargs["error_category"], str)

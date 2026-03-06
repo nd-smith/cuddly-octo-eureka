@@ -407,7 +407,7 @@ class ClaimXDeltaEventsWorker:
             self._batch.clear()
             return
 
-        # For TRANSIENT errors, route to retry topic but keep batch intact
+        # For TRANSIENT errors, route to retry topic then clear batch
         logger.info(
             "Transient Delta write error, routing to retry topic",
             extra={
@@ -426,8 +426,8 @@ class ClaimXDeltaEventsWorker:
                 batch_id=uuid.uuid4().hex[:8],
             )
 
-        # Keep batch intact for TRANSIENT errors - don't clear
-        # This prevents data loss if retry topic send fails
+        # Clear batch after successful retry send to prevent duplicate writes
+        self._batch.clear()
 
     def _classify_delta_error(self, error: Exception) -> ErrorCategory:
         """

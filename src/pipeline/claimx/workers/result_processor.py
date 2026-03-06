@@ -447,14 +447,25 @@ class ClaimXResultProcessor:
             )
 
         except Exception as e:
+            error_category = self._classify_flush_error(e)
             log_worker_error(
                 logger,
                 "Failed to flush batch to Delta",
-                error_category="transient",
+                error_category=error_category,
                 exc=e,
                 batch_id=batch_id,
                 batch_size=batch_size,
             )
+
+    @staticmethod
+    def _classify_flush_error(error: Exception) -> str:
+        """Classify flush errors as permanent or transient for logging and handling."""
+        error_str = (str(error) + " " + type(error).__name__).lower()
+        if any(m in error_str for m in ("schema", "validation", "not found", "404")):
+            return "permanent"
+        if any(m in error_str for m in ("401", "403", "unauthorized", "forbidden")):
+            return "auth"
+        return "transient"
 
     def _get_cycle_stats(self, cycle_count: int) -> tuple[str, dict[str, Any]]:
         """Return current stats for PeriodicStatsLogger."""

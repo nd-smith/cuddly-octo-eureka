@@ -468,7 +468,7 @@ class ClaimXEnrichmentWorker:
         merged_rows = await self._fetch_and_merge_project_rows(project_ids)
 
         if self.enable_delta_writes and not merged_rows.is_empty():
-            tasks_for_dispatch = [task for _, task, _ in parsed[:1]]
+            tasks_for_dispatch = [task for _, task, _ in parsed]
             await self._produce_entity_rows(merged_rows, tasks_for_dispatch)
 
     async def _fetch_and_merge_project_rows(
@@ -481,8 +481,11 @@ class ClaimXEnrichmentWorker:
                 rows = await self._ensure_project_exists(pid)
                 if not rows.is_empty():
                     merged.merge(rows)
-            except Exception:
-                pass  # handler will retry per-event
+            except Exception as e:
+                logger.warning(
+                    "Failed to fetch project rows for project",
+                    extra={"project_id": pid, "error": str(e)[:200]},
+                )
         return merged
 
     async def _execute_handler_groups(
@@ -536,7 +539,7 @@ class ClaimXEnrichmentWorker:
                 if result.rows:
                     all_entity_rows.merge(result.rows)
             else:
-                error = Exception(result.error or "Handler returned failure")
+                error = result.original_error if hasattr(result, 'original_error') and result.original_error else Exception(result.error or "Handler returned failure")
                 category = result.error_category or ErrorCategory.TRANSIENT
                 if not result.is_retryable:
                     permanent_failures.append((msg, error))

@@ -426,3 +426,28 @@ class TestDeltaEventsWorkerDeltaWrites:
 
             # Verify no writes occurred
             assert not worker.delta_writer.write_events.called
+
+    @pytest.mark.asyncio
+    async def test_transient_error_clears_batch_after_retry_send(self, mock_config, mock_producer):
+        """Transient error clears batch after successful retry send (H5 fix)."""
+        with patch("pipeline.claimx.workers.delta_events_worker.DeltaRetryHandler"):
+            worker = ClaimXDeltaEventsWorker(
+                config=mock_config,
+                producer=mock_producer,
+                events_table_path="abfss://test/claimx_events",
+            )
+
+            worker.retry_handler = AsyncMock()
+            worker.retry_handler.handle_batch_failure = AsyncMock()
+
+            batch = [{"trace_id": "evt-1"}, {"trace_id": "evt-2"}]
+
+            # Simulate leftover batch data (as if transient error happened)
+            worker._batch = [{"trace_id": "stale"}]
+
+            await worker._handle_failed_batch(
+                batch, Exception("connection timeout")
+            )
+
+            # Batch should be cleared after retry send succeeds
+            assert len(worker._batch) == 0

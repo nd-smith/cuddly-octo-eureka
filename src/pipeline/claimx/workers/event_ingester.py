@@ -501,7 +501,8 @@ class ClaimXEventIngesterWorker:
                 permanent_failures.append((record, e))
                 continue
 
-            latest_timestamp = event.ingested_at
+            if latest_timestamp is None or (event.ingested_at and event.ingested_at > latest_timestamp):
+                latest_timestamp = event.ingested_at
 
             if self._dedup_enabled and self._is_batch_or_memory_duplicate(
                 event.trace_id, seen_in_batch, now,

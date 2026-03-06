@@ -509,3 +509,35 @@ class TestClaimXDownloadWorkerInFlightTracking:
 
             # In-flight tasks should be empty after completion
             assert len(worker._in_flight_tasks) == 0
+
+
+class TestClaimXDownloadWorkerParseFailureSentinel:
+    """Test H3 fix: parse failure creates sentinel task instead of None."""
+
+    @pytest.mark.asyncio
+    async def test_parse_failure_creates_sentinel_task(self, mock_config, tmp_path):
+        """Parse failure creates sentinel ClaimXDownloadTask instead of None (H3 fix)."""
+        with patch("pipeline.claimx.workers.download_worker.create_producer"):
+            worker = ClaimXDownloadWorker(config=mock_config, temp_dir=tmp_path)
+
+        worker._semaphore = AsyncMock()
+        worker._semaphore.__aenter__ = AsyncMock()
+        worker._semaphore.__aexit__ = AsyncMock()
+
+        invalid_message = PipelineMessage(
+            topic="test.topic",
+            partition=0,
+            offset=1,
+            key=b"trace-key",
+            value=b"invalid json{",
+            timestamp=None,
+            headers=None,
+        )
+
+        result = await worker._process_single_task(invalid_message)
+
+        assert result.success is False
+        assert result.task_message is not None
+        assert isinstance(result.task_message, ClaimXDownloadTask)
+        assert result.task_message.media_id == "parse-error"
+        assert result.task_message.trace_id == "trace-key"

@@ -690,3 +690,64 @@ class TestEnrichmentWorkerProjectCache:
 
         mock_api_client.get_project.assert_not_called()
         assert rows.is_empty()
+
+
+class TestEnrichmentWorkerPreflightFix:
+    """Tests for C3 and H4 fixes."""
+
+    @pytest.mark.asyncio
+    async def test_preflight_passes_all_tasks_for_entity_row_dispatch(
+        self, mock_config, patched_project_cache
+    ):
+        """Preflight passes all tasks (not just first) for entity row dispatch (C3 fix)."""
+        worker = ClaimXEnrichmentWorker(config=mock_config)
+        worker._produce_entity_rows = AsyncMock()
+
+        # Create 3 parsed entries
+        tasks = []
+        parsed = []
+        for i in range(3):
+            task = ClaimXEnrichmentTask(
+                trace_id=f"evt-{i}",
+                event_type="PROJECT_CREATED",
+                project_id="proj-456",
+                retry_count=0,
+                created_at=datetime.now(UTC),
+                ingested_at=datetime.now(UTC),
+            )
+            msg = PipelineMessage(
+                topic="test", partition=0, offset=i, key=b"key",
+                value=task.model_dump_json().encode(), timestamp=None, headers=None,
+            )
+            event = Mock()
+            parsed.append((msg, task, event))
+            tasks.append(task)
+
+        # Mock _fetch_and_merge_project_rows to return non-empty rows
+        entity_rows = EntityRowsMessage()
+        entity_rows.projects = [{"project_id": "proj-456"}]
+        worker._fetch_and_merge_project_rows = AsyncMock(return_value=entity_rows)
+
+        await worker._preflight_project_check(parsed)
+
+        # Verify all 3 tasks passed, not just first
+        call_args = worker._produce_entity_rows.call_args[0]
+        dispatched_tasks = call_args[1]
+        assert len(dispatched_tasks) == 3
+
+    @pytest.mark.asyncio
+    async def test_fetch_and_merge_logs_warning_on_failure(
+        self, mock_config, mock_api_client, patched_project_cache
+    ):
+        """_fetch_and_merge_project_rows logs warning on failure (H4 fix)."""
+        worker = ClaimXEnrichmentWorker(config=mock_config, api_client=mock_api_client)
+        worker._ensure_project_exists = AsyncMock(side_effect=Exception("API error"))
+
+        with patch("pipeline.claimx.workers.enrichment_worker.logger") as mock_logger:
+            result = await worker._fetch_and_merge_project_rows({"proj-123"})
+
+            # Should return empty rows (not crash)
+            assert result.is_empty()
+            # Should log a warning
+            mock_logger.warning.assert_called_once()
+            assert "proj-123" in str(mock_logger.warning.call_args)

@@ -46,17 +46,35 @@ Tracking review progress layer-by-layer through the ClaimX pipeline.
 
 ---
 
-## Up Next
-
 ### 3. Workers (`src/pipeline/claimx/workers/`)
-- `event_ingester.py` — EventHub consumer → enrichment task producer
-- `enrichment_worker.py` — Enrichment task consumer → API calls → entity/download tasks
-- `download_worker.py` — Download task consumer → file downloads
-- `download_factory.py` — Download task construction
-- `upload_worker.py` — Cached file → OneLake upload
-- `delta_events_worker.py` — Event data → Delta Lake writes
-- `entity_delta_worker.py` — Entity data → Delta Lake writes
-- `result_processor.py` — Upload result processing
+- **Reviewed:** 2026-03-05
+- **Files:** `entity_delta_worker.py`, `enrichment_worker.py`, `delta_events_worker.py`, `result_processor.py`, `download_worker.py`, `download_factory.py`, `upload_worker.py`, `event_ingester.py`
+- **Issues found:** 3 critical, 5 high, 6 medium, 4 low — 13 fixed, 5 deferred
+- **Tests added/updated:** 11 new tests, 1 updated
+- **Key fixes:**
+  - **C1:** `entity_delta_worker._flush_batch()` — dead `self._batch.copy()` result discarded; removed
+  - **C2:** `entity_delta_worker._handle_message()` — parse failure silently swallowed; now raises `PermanentError`
+  - **C3:** `enrichment_worker._preflight_project_check()` — only first task passed to dispatch; now passes all tasks
+  - **H1:** `result_processor._flush_batch()` — all flush errors hardcoded as "transient"; added `_classify_flush_error()` method
+  - **H3:** `download_worker._process_single_task()` — `task_message=None` on parse failure; now creates sentinel `ClaimXDownloadTask`
+  - **H4:** `enrichment_worker._fetch_and_merge_project_rows()` — bare `except: pass`; now logs warning with project_id
+  - **H5:** `delta_events_worker._handle_failed_batch()` — transient error kept batch intact causing unbounded growth; now clears batch after retry send
+  - **M1:** `enrichment_worker._tally_and_route_results()` — preserves original error type when available
+  - **M3:** `entity_delta_worker._handle_flush_error()` — `error_category` passed as enum to `handle_batch_failure` expecting str; now passes `.value`
+  - **M5:** `download_factory.create_download_tasks_from_media()` — validates `media_id` non-empty, skips with warning if empty
+  - **M6:** `upload_worker.start()` — removed `loop.set_default_executor()` that modified global event loop state
+  - **L1:** `event_ingester._parse_and_dedup_events()` — `latest_timestamp` now tracks actual max instead of last event
+  - **L2:** Added docstring to `entity_delta_worker._handle_flush_error` (already present)
+- **Deferred:**
+  - **H2:** Batch data "loss" on flush error mitigated by consumer redelivery
+  - **M2:** Private `_validate_pre_download` access — internal to project, out of scope
+  - **M4:** Failed results not written to Delta inventory — feature request
+  - **L3:** Hardcoded health ports — consistent pattern, broader refactor needed
+  - **L4:** Hardcoded ITEL task IDs — acceptable for now
+
+---
+
+## Up Next
 
 ### 4. Retry (`src/pipeline/claimx/retry/`)
 - `enrichment_handler.py` — Enrichment retry/DLQ routing

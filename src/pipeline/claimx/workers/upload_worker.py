@@ -250,16 +250,6 @@ class ClaimXUploadWorker:
         # Initialize storage client (use injected client or create OneLake client)
         await self._init_storage_client()
 
-        # Size the default thread pool to match upload concurrency so
-        # asyncio.to_thread calls (OneLake uploads, file I/O) aren't bottlenecked
-        # by the default min(32, cpu+4) executor.
-        import concurrent.futures
-
-        loop = asyncio.get_running_loop()
-        loop.set_default_executor(
-            concurrent.futures.ThreadPoolExecutor(max_workers=self.concurrency + 4)
-        )
-
         # Create batch consumer from transport layer
         try:
             self._consumer = await create_batch_consumer(

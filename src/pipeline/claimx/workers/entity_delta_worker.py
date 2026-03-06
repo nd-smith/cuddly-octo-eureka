@@ -9,6 +9,7 @@ import orjson
 import logging
 
 from config.config import MessageConfig
+from core.errors.exceptions import PermanentError
 from core.logging.periodic_logger import PeriodicStatsLogger
 from core.logging.utilities import log_worker_error
 from core.types import ErrorCategory
@@ -303,6 +304,7 @@ class ClaimXEntityDeltaWorker:
                 offset=record.offset,
             )
             self._records_failed += 1
+            raise PermanentError(str(e)) from e
 
     def _trigger_flush(self) -> None:
         """Trigger a non-blocking flush operation.
@@ -356,7 +358,6 @@ class ClaimXEntityDeltaWorker:
             for msg in self._batch:
                 merged_rows.merge(msg)
 
-            self._batch.copy()  # Keep for error handling if needed
             self._batch.clear()
 
         if merged_rows.is_empty():
@@ -464,7 +465,7 @@ class ClaimXEntityDeltaWorker:
                 batch=events,
                 error=error,
                 retry_count=0,
-                error_category=error_category,
+                error_category=error_category.value,
             )
             log_level = "warning" if error_category == ErrorCategory.PERMANENT else "info"
             msg = (

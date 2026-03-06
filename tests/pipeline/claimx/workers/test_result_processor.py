@@ -397,3 +397,42 @@ class TestClaimXResultProcessorPeriodicTasks:
 
         # Verify flush was called due to timeout
         assert processor._flush_batch.called
+
+
+class TestClaimXResultProcessorErrorClassification:
+    """Test flush error classification (H1 fix)."""
+
+    def test_schema_error_classified_as_permanent(self):
+        """Schema errors classified as permanent."""
+        category = ClaimXResultProcessor._classify_flush_error(
+            ValueError("schema validation failed")
+        )
+        assert category == "permanent"
+
+    def test_not_found_error_classified_as_permanent(self):
+        """Not found errors classified as permanent."""
+        category = ClaimXResultProcessor._classify_flush_error(
+            Exception("resource not found (404)")
+        )
+        assert category == "permanent"
+
+    def test_auth_error_classified_as_auth(self):
+        """Auth errors classified as auth."""
+        category = ClaimXResultProcessor._classify_flush_error(
+            Exception("401 unauthorized")
+        )
+        assert category == "auth"
+
+    def test_connection_error_classified_as_transient(self):
+        """Connection errors classified as transient."""
+        category = ClaimXResultProcessor._classify_flush_error(
+            ConnectionError("connection refused")
+        )
+        assert category == "transient"
+
+    def test_unknown_error_classified_as_transient(self):
+        """Unknown errors default to transient."""
+        category = ClaimXResultProcessor._classify_flush_error(
+            RuntimeError("something weird happened")
+        )
+        assert category == "transient"

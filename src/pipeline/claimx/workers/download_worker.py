@@ -606,9 +606,20 @@ class ClaimXDownloadWorker:
                 },
                 exc_info=True,
             )
+            # Create a sentinel task so downstream code never sees None
+            sentinel_task = ClaimXDownloadTask(
+                media_id="parse-error",
+                project_id="parse-error",
+                download_url="parse-error",
+                blob_path="parse-error",
+                file_type="",
+                file_name="",
+                trace_id=message.key.decode("utf-8") if message.key else "unknown",
+                retry_count=0,
+            )
             return TaskResult(
                 message=message,
-                task_message=None,  # type: ignore
+                task_message=sentinel_task,
                 outcome=DownloadOutcome(
                     success=False,
                     error_message=f"Failed to parse message: {str(e)}",
