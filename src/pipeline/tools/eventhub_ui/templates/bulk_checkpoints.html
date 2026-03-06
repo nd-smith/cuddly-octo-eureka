@@ -5,7 +5,10 @@
 <p class="text-muted mb-1">Select consumer groups to advance checkpoints to latest</p>
 
 <div class="card">
-    <form id="bulk-form">
+    <form id="bulk-form"
+          hx-post="/bulk-checkpoints/preview"
+          hx-target="#bulk-result"
+          hx-swap="innerHTML">
         <table>
             <thead>
                 <tr>
@@ -32,11 +35,7 @@
         </table>
 
         <div style="margin-top: 0.75rem; display: flex; gap: 0.5rem;">
-            <button type="button" class="btn btn-primary"
-                    hx-post="/bulk-checkpoints/preview"
-                    hx-include="#bulk-form"
-                    hx-target="#bulk-result"
-                    hx-swap="innerHTML">
+            <button type="submit" class="btn btn-primary">
                 Preview
             </button>
         </div>
