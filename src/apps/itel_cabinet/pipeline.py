@@ -161,9 +161,9 @@ class ItelCabinetPipeline:
         """Extract adjuster info from the task response group.
 
         Looks for group with groupId "group-309019430" and reads:
-          - question 0: Vendor Name → adjuster_id
-          - question 1: First Name → first_name
-          - question 2: Last Name → last_name
+          - question 0: Technician First Name → first_name
+          - question 1: Technician Last Name → last_name
+          - question 2: Vendor Name → adjuster_id
           - question 3: Best Contact Number → phone
           - question 4: Best Contact Email → email
         """
@@ -189,9 +189,9 @@ class ItelCabinetPipeline:
             return ""
 
         return {
-            "adjuster_id": _get_text(0),
-            "first_name": _get_text(1),
-            "last_name": _get_text(2),
+            "first_name": _get_text(0),
+            "last_name": _get_text(1),
+            "adjuster_id": _get_text(2),
             "phone": _get_text(3),
             "email": _get_text(4),
         }

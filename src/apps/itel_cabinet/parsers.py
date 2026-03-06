@@ -342,12 +342,14 @@ class DataBuilder:
     def extract_value(export_data: ResponseAnswerExport):
         """
         Extracts and normalizes value from response answer.
-        Handles Yes/No -> True/False conversion for boolean fields.
+        Handles Yes/No -> True/False conversion for option/dropdown fields only.
+        Text fields are always returned as-is to avoid converting free-text
+        answers like "there is no" into boolean False.
         """
         if not export_data:
             return None
         val = DataBuilder._extract_raw_value(export_data)
-        if isinstance(val, str):
+        if isinstance(val, str) and export_data.type == "option":
             normalized = DataBuilder._normalize_boolean(val)
             if normalized is not None:
                 return normalized
