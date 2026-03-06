@@ -5,7 +5,7 @@ import logging
 from datetime import UTC
 
 from fastapi import APIRouter, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from pipeline.tools.eventhub_ui.config import get_ssl_kwargs, list_eventhubs
 from pipeline.tools.eventhub_ui.routes import _helpers
@@ -18,6 +18,15 @@ from pipeline.tools.eventhub_ui.routes._helpers import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+@router.get("/messages", response_class=HTMLResponse)
+async def message_viewer_index(request: Request):
+    """Redirect to first available EventHub."""
+    hubs = list_eventhubs()
+    if not hubs:
+        return error_response(request, "No EventHubs configured", 404)
+    return RedirectResponse(url=f"/messages/{hubs[0].eventhub_name}", status_code=302)
 
 
 @router.get("/messages/{eventhub_name}", response_class=HTMLResponse)
