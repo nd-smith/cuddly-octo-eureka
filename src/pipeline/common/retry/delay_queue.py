@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from pipeline.common.log_fields import producer_log_fields
+
 logger = logging.getLogger(__name__)
 
 EXPIRED_MESSAGE_GRACE_SECONDS = 300
@@ -167,7 +169,7 @@ class DelayQueue:
                         "Skipping expired message from persistence",
                         extra={
                             "scheduled_time": scheduled_time.isoformat(),
-                            "target_topic": msg_data["target_topic"],
+                            **producer_log_fields(output_topic=msg_data["target_topic"]),
                         },
                     )
                     continue

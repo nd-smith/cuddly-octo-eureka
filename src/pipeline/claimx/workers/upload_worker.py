@@ -646,7 +646,7 @@ class ClaimXUploadWorker:
                 logger.warning(
                     "Timeout waiting for in-flight uploads",
                     extra={
-                        "remaining_tasks": count,
+                        "in_flight": count,
                         "timeout_seconds": timeout,
                     },
                 )
@@ -654,7 +654,7 @@ class ClaimXUploadWorker:
 
             logger.debug(
                 "Waiting for in-flight uploads",
-                extra={"remaining_tasks": count},
+                extra={"in_flight": count},
             )
             await asyncio.sleep(0.5)
 
@@ -668,10 +668,13 @@ class ClaimXUploadWorker:
                 with contextlib.suppress(OSError):
                     await asyncio.to_thread(parent.rmdir)
 
-            logger.debug("Cleaned up cache file", extra={"cache_path": str(cache_path)})
+            logger.debug(
+                "Cleaned up cache file",
+                extra={"cache_file": cache_path.name},
+            )
 
         except Exception as e:
             logger.warning(
                 "Failed to clean up cache file",
-                extra={"cache_path": str(cache_path), "error": str(e)},
+                extra={"cache_file": cache_path.name, "error": str(e)},
             )

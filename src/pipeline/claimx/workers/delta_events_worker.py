@@ -18,6 +18,7 @@ from core.logging.utilities import log_worker_error
 from core.types import ErrorCategory
 from pipeline.claimx.schemas.tasks import ClaimXEnrichmentTask
 from pipeline.claimx.writers import ClaimXEventsDeltaWriter
+from pipeline.common.log_fields import message_log_fields
 from pipeline.common.health import HealthCheckServer
 from pipeline.common.metrics import record_delta_write
 from pipeline.common.retry.delta_handler import DeltaRetryHandler
@@ -294,12 +295,10 @@ class ClaimXDeltaEventsWorker:
 
     def _record_log_context(self, record: PipelineMessage) -> dict[str, Any]:
         """Build log context dict from a PipelineMessage."""
-        return {
-            "topic": record.topic,
-            "partition": record.partition,
-            "offset": record.offset,
-            "trace_id": record.key.decode("utf-8") if record.key else None,
-        }
+        extra = message_log_fields(record)
+        if record.key:
+            extra["trace_id"] = record.key.decode("utf-8")
+        return extra
 
     async def _handle_event_message(self, record: PipelineMessage) -> None:
         """

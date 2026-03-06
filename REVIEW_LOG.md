@@ -207,6 +207,12 @@ Tracking review progress layer-by-layer through the ClaimX pipeline.
 - The largest gap is not missing log statements; it is that the logging contract between producers and the JSON formatter is inconsistent and currently drops too much of ClaimX’s intended diagnostic context.
 - Once that contract is fixed, ClaimX’s worker/handler logging should become substantially more useful without requiring a large volume of new log statements.
 
+#### Remediation status
+- **Completed 2026-03-05:** `JSONFormatter` now preserves arbitrary structured extras, injects message context automatically, and recursively redacts nested secrets and URLs.
+- **Completed 2026-03-05:** ClaimX API client and worker hot paths now use canonical keys like `message_topic`, `message_partition`, `message_offset`, `output_topic`, `producer_partition`, `producer_offset`, and `duration_ms`.
+- **Completed 2026-03-05:** Raw parse payload previews were removed from ClaimX parse-failure logs in favor of payload size plus SHA-256 fingerprints.
+- **Completed 2026-03-05:** Added regression coverage for formatter behavior, message-context restoration, nested redaction, and touched ClaimX worker paths.
+
 ---
 
 ## Up Next

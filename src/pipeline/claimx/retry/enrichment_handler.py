@@ -12,6 +12,7 @@ from config.config import MessageConfig
 from core.types import ErrorCategory
 from pipeline.claimx.schemas.results import FailedEnrichmentMessage
 from pipeline.claimx.schemas.tasks import ClaimXEnrichmentTask
+from pipeline.common.log_fields import producer_log_fields
 from pipeline.common.metrics import record_dlq_message
 from pipeline.common.retry.retry_utils import (
     create_dlq_headers,
@@ -216,7 +217,7 @@ class EnrichmentRetryHandler:
                 "retry_count": updated_task.retry_count,
                 "delay_seconds": delay_seconds,
                 "retry_at": retry_at.isoformat(),
-                "target_topic": target_topic,
+                **producer_log_fields(output_topic=target_topic),
             },
         )
 
@@ -239,7 +240,7 @@ class EnrichmentRetryHandler:
             "Task sent to retry topic successfully",
             extra={
                 "trace_id": task.trace_id,
-                "target_topic": target_topic,
+                **producer_log_fields(output_topic=target_topic),
             },
         )
 

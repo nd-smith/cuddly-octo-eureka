@@ -57,6 +57,7 @@ from typing import Any
 from config.config import MessageConfig
 from core.logging.utilities import log_worker_error
 from core.types import ErrorCategory
+from pipeline.common.log_fields import producer_log_fields
 from pipeline.common.metrics import (
     record_dlq_message,
 )
@@ -184,9 +185,7 @@ class DeltaRetryHandler:
 
         logger.info(
             "DeltaRetryHandler producers started",
-            extra={
-                "dlq_topic": self._dlq_topic,
-            },
+            extra=producer_log_fields(output_topic=self._dlq_topic),
         )
 
     async def stop(self) -> None:
@@ -581,12 +580,11 @@ class DeltaRetryHandler:
             extra={
                 "batch_id": batch_id,
                 "event_count": len(batch),
-                "retry_topic": retry_topic,
                 "retry_count": retry_count + 1,
                 "delay_seconds": delay_seconds,
                 "retry_at": retry_at.isoformat(),
-                "target_topic": target_topic,
                 "sample_trace_ids": sample_trace_ids,
+                **producer_log_fields(output_topic=retry_topic),
             },
         )
 
@@ -610,8 +608,7 @@ class DeltaRetryHandler:
             "Batch sent to retry topic successfully",
             extra={
                 "batch_id": batch_id,
-                "retry_topic": retry_topic,
-                "target_topic": target_topic,
+                **producer_log_fields(output_topic=retry_topic),
             },
         )
 
@@ -686,7 +683,7 @@ class DeltaRetryHandler:
             "Batch sent to DLQ successfully",
             extra={
                 "batch_id": batch_id,
-                "dlq_topic": self._dlq_topic,
+                **producer_log_fields(output_topic=self._dlq_topic),
             },
         )
 

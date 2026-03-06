@@ -18,6 +18,7 @@ from pipeline.claimx.handlers.utils import (
 )
 from pipeline.claimx.schemas.results import FailedDownloadMessage
 from pipeline.claimx.schemas.tasks import ClaimXDownloadTask
+from pipeline.common.log_fields import producer_log_fields
 from pipeline.common.metrics import (
     record_dlq_message,
 )
@@ -356,7 +357,7 @@ class DownloadRetryHandler:
                 "retry_count": updated_task.retry_count,
                 "delay_seconds": delay_seconds,
                 "retry_at": retry_at.isoformat(),
-                "target_topic": target_topic,
+                **producer_log_fields(output_topic=target_topic),
             },
         )
 
@@ -381,7 +382,7 @@ class DownloadRetryHandler:
             extra={
                 "trace_id": task.trace_id,
                 "media_id": task.media_id,
-                "target_topic": target_topic,
+                **producer_log_fields(output_topic=target_topic),
             },
         )
 

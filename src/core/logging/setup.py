@@ -415,7 +415,11 @@ def _attach_eventhub_handler(root_logger: logging.Logger, cfg: LoggingConfig) ->
         return
 
     eh = cfg.eventhub_config
-    print(f"[STARTUP] Creating EventHub log handler for: {eh['eventhub_name']}")
+    logger = logging.getLogger(__name__)
+    logger.info(
+        "Creating EventHub log handler",
+        extra={"eventhub_name": eh["eventhub_name"]},
+    )
     eventhub_handler = _create_eventhub_handler(
         connection_string=eh["connection_string"],
         eventhub_name=eh["eventhub_name"],
@@ -427,9 +431,15 @@ def _attach_eventhub_handler(root_logger: logging.Logger, cfg: LoggingConfig) ->
     )
     if eventhub_handler:
         root_logger.addHandler(eventhub_handler)
-        print("[STARTUP] EventHub log handler created and attached successfully")
+        logger.info(
+            "EventHub log handler attached",
+            extra={"eventhub_name": eh["eventhub_name"]},
+        )
     else:
-        print("[STARTUP] EventHub log handler creation FAILED - check error logs")
+        logger.warning(
+            "EventHub log handler creation failed; continuing without EventHub logging",
+            extra={"eventhub_name": eh["eventhub_name"]},
+        )
 
 
 def _create_console_handler(cfg: LoggingConfig) -> logging.StreamHandler:
@@ -511,8 +521,8 @@ def setup_logging(
         set_log_context(domain=domain)
 
     root_logger = _reset_root_logger()
-    _attach_eventhub_handler(root_logger, cfg)
     root_logger.addHandler(_create_console_handler(cfg))
+    _attach_eventhub_handler(root_logger, cfg)
 
     # File handler — always created regardless of log_to_stdout
     instance_id = _generate_instance_id() if cfg.use_instance_id else None
@@ -571,8 +581,8 @@ def setup_multi_worker_logging(
     log_dir = log_dir or DEFAULT_LOG_DIR
 
     root_logger = _reset_root_logger()
-    _attach_eventhub_handler(root_logger, cfg)
     root_logger.addHandler(_create_console_handler(cfg))
+    _attach_eventhub_handler(root_logger, cfg)
 
     # File handlers — always created regardless of log_to_stdout
     instance_id = _generate_instance_id() if cfg.use_instance_id else None

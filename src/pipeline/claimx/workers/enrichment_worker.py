@@ -5,6 +5,7 @@ Routes events by type to specialized handlers.
 """
 
 import asyncio
+import hashlib
 import orjson
 import logging
 import uuid
@@ -35,6 +36,7 @@ from pipeline.claimx.schemas.tasks import (
 from pipeline.claimx.workers.download_factory import create_download_tasks_from_media
 from pipeline.common.worker_defaults import CYCLE_LOG_INTERVAL_SECONDS
 from pipeline.common.health import HealthCheckServer
+from pipeline.common.log_fields import producer_log_fields
 from pipeline.common.metrics import (
     record_delta_write,
     record_processing_error,
@@ -303,7 +305,10 @@ class ClaimXEnrichmentWorker:
             await self.itel_producer.start()
             logger.info(
                 "ITEL event routing initialized",
-                extra={"topic": self.ITEL_PENDING_TOPIC, "task_ids": list(self.ITEL_TASK_IDS)},
+                extra={
+                    **producer_log_fields(output_topic=self.ITEL_PENDING_TOPIC),
+                    "task_ids": list(self.ITEL_TASK_IDS),
+                },
             )
         except Exception as e:
             logger.warning(
@@ -604,17 +609,19 @@ class ClaimXEnrichmentWorker:
             message_data = orjson.loads(record.value)
             task = ClaimXEnrichmentTask.model_validate(message_data)
         except (orjson.JSONDecodeError, ValidationError) as e:
-            raw_preview = record.value[:1000].decode("utf-8", errors="replace") if record.value else ""
             logger.error(
                 "Failed to parse ClaimXEnrichmentTask",
                 extra={
                     "trace_id": record.key.decode("utf-8") if record.key else None,
-                    "topic": record.topic,
-                    "partition": record.partition,
-                    "offset": record.offset,
+                    "message_topic": record.topic,
+                    "message_partition": record.partition,
+                    "message_offset": record.offset,
+                    "message_key": record.key.decode("utf-8") if record.key else None,
                     "error": str(e),
-                    "raw_payload_preview": raw_preview,
                     "raw_payload_bytes": len(record.value) if record.value else 0,
+                    "payload_sha256": (
+                        hashlib.sha256(record.value).hexdigest() if record.value else None
+                    ),
                 },
                 exc_info=True,
             )
@@ -1039,8 +1046,7 @@ class ClaimXEnrichmentWorker:
                         "media_id": task.media_id,
                         "project_id": task.project_id,
                         "blob_path": task.blob_path,
-                        "partition": metadata.partition,
-                        "offset": metadata.offset,
+                        **producer_log_fields(self.download_topic, metadata),
                     },
                 )
 

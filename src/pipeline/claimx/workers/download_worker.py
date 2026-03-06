@@ -5,6 +5,7 @@ Decoupled architecture allows independent scaling of download vs upload.
 """
 
 import asyncio
+import hashlib
 import logging
 import shutil
 import tempfile
@@ -469,9 +470,9 @@ class ClaimXDownloadWorker:
                 logger.error(
                     "Unhandled exception processing message",
                     extra={
-                        "topic": msg.topic,
-                        "partition": msg.partition,
-                        "offset": msg.offset,
+                        "message_topic": msg.topic,
+                        "message_partition": msg.partition,
+                        "message_offset": msg.offset,
                         "error": str(result),
                     },
                     exc_info=result,
@@ -588,16 +589,18 @@ class ClaimXDownloadWorker:
         try:
             task_message = ClaimXDownloadTask.model_validate_json(message.value)
         except Exception as e:
-            raw_preview = message.value[:1000].decode("utf-8", errors="replace") if message.value else ""
             logger.error(
                 "Failed to parse ClaimXDownloadTask",
                 extra={
-                    "topic": message.topic,
-                    "partition": message.partition,
-                    "offset": message.offset,
+                    "message_topic": message.topic,
+                    "message_partition": message.partition,
+                    "message_offset": message.offset,
+                    "message_key": message.key.decode("utf-8") if message.key else None,
                     "error": str(e),
-                    "raw_payload_preview": raw_preview,
                     "raw_payload_bytes": len(message.value) if message.value else 0,
+                    "payload_sha256": (
+                        hashlib.sha256(message.value).hexdigest() if message.value else None
+                    ),
                 },
                 exc_info=True,
             )
@@ -643,7 +646,7 @@ class ClaimXDownloadWorker:
                     "download_url": task_message.download_url,
                     "destination_path": task_message.blob_path,
                     "retry_count": task_message.retry_count,
-                    "topic": message.topic,
+                    "message_topic": message.topic,
                 },
             )
 
@@ -821,7 +824,6 @@ class ClaimXDownloadWorker:
                 "bytes_downloaded": outcome.bytes_downloaded,
                 "content_type": outcome.content_type,
                 "processing_time_ms": processing_time_ms,
-                "local_path": str(outcome.file_path),
             },
         )
 
@@ -870,7 +872,7 @@ class ClaimXDownloadWorker:
             "Produced ClaimX cached download message",
             extra={
                 "media_id": task_message.media_id,
-                "topic": self.cached_topic,
+                "output_topic": self.cached_topic,
                 "cache_path": str(cache_path),
             },
         )

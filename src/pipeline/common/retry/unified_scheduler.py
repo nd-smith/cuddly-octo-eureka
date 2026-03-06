@@ -21,6 +21,7 @@ from core.logging.periodic_logger import PeriodicStatsLogger
 from core.logging.utilities import detect_log_output_mode, log_startup_banner
 from pipeline.common.decorators import set_log_context_from_message
 from pipeline.common.health import HealthCheckServer
+from pipeline.common.log_fields import message_log_fields, producer_log_fields
 from pipeline.common.retry.delay_queue import DelayedMessage, DelayQueue
 from pipeline.common.transport import create_consumer, create_producer
 from pipeline.common.types import PipelineMessage
@@ -318,7 +319,10 @@ class UnifiedRetryScheduler:
             try:
                 await producer.stop()
             except Exception as e:
-                logger.error("Error stopping producer", extra={"error": str(e), "topic": topic})
+                logger.error(
+                    "Error stopping producer",
+                    extra={"error": str(e), **producer_log_fields(output_topic=topic)},
+                )
         self._producer_pool.clear()
 
     async def _stop_dlq_producer(self) -> None:
@@ -350,8 +354,8 @@ class UnifiedRetryScheduler:
                 type(message.headers).__name__,
                 len(message.headers) if message.headers else 0,
                 extra={
-                    "topic": message.topic, "partition": message.partition,
-                    "offset": message.offset, "missing_headers": missing,
+                    **message_log_fields(message),
+                    "missing_headers": missing,
                     "available_headers": list(headers.keys()),
                 },
             )
@@ -363,7 +367,10 @@ class UnifiedRetryScheduler:
         if retry_count is None:
             logger.error(
                 "Invalid retry_count in header, routing to DLQ",
-                extra={"retry_count": headers["retry_count"], "target_topic": headers["target_topic"]},
+                extra={
+                    "retry_count": headers["retry_count"],
+                    **producer_log_fields(output_topic=headers["target_topic"]),
+                },
             )
             self._messages_malformed += 1
             await self._send_to_dlq(message, f"Invalid retry_count: {headers['retry_count']}", headers)
@@ -387,7 +394,7 @@ class UnifiedRetryScheduler:
             extra={
                 "scheduled_retry_time": scheduled_time.isoformat(),
                 "seconds_remaining": seconds_remaining,
-                "target_topic": target_topic,
+                **producer_log_fields(output_topic=target_topic),
             },
         )
         delayed_msg = DelayedMessage(
@@ -417,7 +424,8 @@ class UnifiedRetryScheduler:
         logger.debug(
             "Processing retry message",
             extra={
-                "target_topic": target_topic, "retry_count": retry_count,
+                **producer_log_fields(output_topic=target_topic),
+                "retry_count": retry_count,
                 "worker_type": worker_type, "scheduled_retry_time": headers["scheduled_retry_time"],
             },
         )
@@ -428,7 +436,8 @@ class UnifiedRetryScheduler:
                 "Retries exhausted, routing to DLQ",
                 extra={
                     "retry_count": retry_count, "max_retries": self._max_retries,
-                    "target_topic": target_topic, "worker_type": worker_type,
+                    **producer_log_fields(output_topic=target_topic),
+                    "worker_type": worker_type,
                 },
             )
             self._messages_exhausted += 1
@@ -461,7 +470,11 @@ class UnifiedRetryScheduler:
         # Ready — route to target topic immediately
         logger.info(
             "Routing message to target topic",
-            extra={"target_topic": target_topic, "retry_count": retry_count, "worker_type": worker_type},
+            extra={
+                **producer_log_fields(output_topic=target_topic),
+                "retry_count": retry_count,
+                "worker_type": worker_type,
+            },
         )
 
         await self._route_to_target(
@@ -529,9 +542,7 @@ class UnifiedRetryScheduler:
         logger.error(
             "Sending malformed retry message to DLQ",
             extra={
-                "topic": message.topic,
-                "partition": message.partition,
-                "offset": message.offset,
+                **message_log_fields(message),
                 "reason": reason,
             },
         )
@@ -554,7 +565,7 @@ class UnifiedRetryScheduler:
 
             logger.info(
                 "Malformed message sent to DLQ",
-                extra={"dlq_topic": dlq_topic},
+                extra=producer_log_fields(output_topic=dlq_topic),
             )
 
         except Exception as e:
@@ -562,7 +573,7 @@ class UnifiedRetryScheduler:
                 "Failed to send malformed message to DLQ",
                 extra={
                     "error": str(e),
-                    "dlq_topic": self._dlq_topic,
+                    **producer_log_fields(output_topic=self._dlq_topic),
                 },
                 exc_info=True,
             )
@@ -588,7 +599,7 @@ class UnifiedRetryScheduler:
             logger.error(
                 "Unknown target topic, routing to DLQ",
                 extra={
-                    "target_topic": target_topic,
+                    **producer_log_fields(output_topic=target_topic),
                     "known_topics": list(self._producer_pool.keys()),
                     "worker_type": worker_type,
                 },
@@ -633,7 +644,7 @@ class UnifiedRetryScheduler:
             logger.info(
                 "Message routed successfully",
                 extra={
-                    "target_topic": target_topic,
+                    **producer_log_fields(output_topic=target_topic),
                     "messages_routed": self._messages_routed,
                 },
             )
@@ -659,7 +670,7 @@ class UnifiedRetryScheduler:
                     logger.debug(
                         "Processing delayed message",
                         extra={
-                            "target_topic": delayed_msg.target_topic,
+                            **producer_log_fields(output_topic=delayed_msg.target_topic),
                             "retry_count": delayed_msg.retry_count,
                             "scheduled_time": delayed_msg.scheduled_time.isoformat(),
                         },

@@ -494,9 +494,9 @@ class ClaimXEventIngesterWorker:
                     "Failed to parse ClaimXEventMessage, routing to DLQ",
                     extra={
                         "trace_id": record.key.decode("utf-8") if record.key else None,
-                        "topic": record.topic,
-                        "partition": record.partition,
-                        "offset": record.offset,
+                        "message_topic": record.topic,
+                        "message_partition": record.partition,
+                        "message_offset": record.offset,
                         "error": str(e),
                     },
                 )

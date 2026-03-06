@@ -6,7 +6,12 @@ import sys
 
 import pytest
 
-from core.logging.context import clear_log_context, set_log_context
+from core.logging.context import (
+    clear_log_context,
+    clear_message_context,
+    set_log_context,
+    set_message_context,
+)
 from core.logging.formatters import ConsoleFormatter, JSONFormatter
 
 
@@ -35,8 +40,10 @@ class TestJSONFormatter:
     @pytest.fixture(autouse=True)
     def clear_context(self):
         clear_log_context()
+        clear_message_context()
         yield
         clear_log_context()
+        clear_message_context()
 
     def test_formats_basic_json_with_required_fields(self):
         formatter = JSONFormatter()
@@ -151,6 +158,77 @@ class TestJSONFormatter:
         assert output["duration_ms"] == 150.5
         assert output["http_status"] == 200
         assert output["error_message"] == "something broke"
+
+    def test_preserves_non_whitelisted_extra_fields(self):
+        formatter = JSONFormatter()
+        record = _make_record(
+            remaining_tasks=3,
+            trace_ids=["t-1", "t-2"],
+            nested={"key": "value"},
+        )
+        output = json.loads(formatter.format(record))
+
+        assert output["remaining_tasks"] == 3
+        assert output["trace_ids"] == ["t-1", "t-2"]
+        assert output["nested"] == {"key": "value"}
+
+    def test_includes_message_context(self):
+        set_message_context(
+            topic="claimx-downloads-pending",
+            partition=4,
+            offset=123,
+            key="trace-123",
+            consumer_group="claimx-download-worker",
+        )
+        formatter = JSONFormatter()
+        output = json.loads(formatter.format(_make_record()))
+
+        assert output["message_topic"] == "claimx-downloads-pending"
+        assert output["message_partition"] == 4
+        assert output["message_offset"] == 123
+        assert output["message_key"] == "trace-123"
+        assert output["message_consumer_group"] == "claimx-download-worker"
+
+    def test_record_extra_overrides_message_context(self):
+        set_message_context(topic="from-context", partition=1, offset=2)
+        formatter = JSONFormatter()
+        record = _make_record(message_topic="from-record", message_partition=99)
+        output = json.loads(formatter.format(record))
+
+        assert output["message_topic"] == "from-record"
+        assert output["message_partition"] == 99
+        assert output["message_offset"] == 2
+
+    def test_recursively_redacts_sensitive_nested_fields(self):
+        formatter = JSONFormatter()
+        record = _make_record(
+            metadata={
+                "connection_string": "Endpoint=sb://secret/;SharedAccessKey=abc",
+                "nested": {"access_token": "secret-token"},
+            }
+        )
+        output = json.loads(formatter.format(record))
+
+        assert output["metadata"]["connection_string"] == "[REDACTED]"
+        assert output["metadata"]["nested"]["access_token"] == "[REDACTED]"
+
+    def test_redacts_sensitive_top_level_fields(self):
+        formatter = JSONFormatter()
+        record = _make_record(connection_string="Endpoint=sb://secret/;SharedAccessKey=abc")
+        output = json.loads(formatter.format(record))
+
+        assert output["connection_string"] == "[REDACTED]"
+
+    def test_recursively_sanitizes_nested_urls(self):
+        formatter = JSONFormatter()
+        record = _make_record(
+            metadata={
+                "http_url": "https://example.com/file?sig=secret&ok=1",
+            }
+        )
+        output = json.loads(formatter.format(record))
+
+        assert output["metadata"]["http_url"] == "https://example.com/file?sig=[REDACTED]&ok=1"
 
     def test_omits_none_extra_fields(self):
         formatter = JSONFormatter()

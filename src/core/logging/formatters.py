@@ -7,8 +7,16 @@ import sys
 from datetime import UTC, datetime
 from typing import Any
 
-from core.logging.context import get_log_context
+from core.logging.context import get_log_context, get_message_context
 from core.utils.json_serializers import json_serializer
+
+
+_STANDARD_LOG_RECORD_FIELDS = frozenset(logging.makeLogRecord({}).__dict__.keys()) | {
+    "message",
+    "asctime",
+}
+
+_SENSITIVE_FIELD_MARKER = "[REDACTED]"
 
 
 class JSONFormatter(logging.Formatter):
@@ -141,7 +149,22 @@ class JSONFormatter(logging.Formatter):
     }
 
     # Fields that contain URLs and should be sanitized
-    URL_FIELDS = ["download_url", "blob_path", "url", "http_url"]
+    URL_FIELDS = ["download_url", "blob_path", "url", "http_url", "api_url"]
+
+    SENSITIVE_FIELD_NAMES = {
+        "authorization",
+        "auth_header",
+        "connection_string",
+        "password",
+        "secret",
+        "client_secret",
+        "sharedaccesskey",
+        "shared_access_key",
+        "token",
+        "api_key",
+        "access_token",
+        "refresh_token",
+    }
 
     # Pattern to match sensitive query parameters
     SENSITIVE_PARAMS_PATTERN = re.compile(
@@ -152,9 +175,40 @@ class JSONFormatter(logging.Formatter):
     def _sanitize_url(self, url: str) -> str:
         return self.SENSITIVE_PARAMS_PATTERN.sub(r"\1\2=[REDACTED]", url)
 
+    @classmethod
+    def _is_sensitive_key(cls, key: str) -> bool:
+        normalized = key.lower()
+        return normalized in cls.SENSITIVE_FIELD_NAMES or any(
+            token in normalized
+            for token in (
+                "password",
+                "secret",
+                "token",
+                "auth",
+                "connection_string",
+                "sharedaccesskey",
+            )
+        )
+
     def _sanitize_value(self, key: str, value: Any) -> Any:
+        if self._is_sensitive_key(key):
+            return _SENSITIVE_FIELD_MARKER
+
         if key in self.URL_FIELDS and isinstance(value, str):
             return self._sanitize_url(value)
+
+        if isinstance(value, dict):
+            return {
+                nested_key: self._sanitize_value(str(nested_key), nested_value)
+                for nested_key, nested_value in value.items()
+            }
+
+        if isinstance(value, list):
+            return [self._sanitize_value(key, item) for item in value]
+
+        if isinstance(value, tuple):
+            return tuple(self._sanitize_value(key, item) for item in value)
+
         return value
 
     def _ensure_type(self, field: str, value: Any) -> Any:
@@ -194,10 +248,27 @@ class JSONFormatter(logging.Formatter):
 
     @staticmethod
     def _inject_context(log_entry: dict[str, Any], log_context: dict[str, Any]) -> None:
-        context_fields = ["domain", "stage", "cycle_id", "worker_id", "trace_id", "media_id"]
+        context_fields = [
+            "domain",
+            "stage",
+            "cycle_id",
+            "worker_id",
+            "trace_id",
+            "media_id",
+            "instance_id",
+        ]
         for field in context_fields:
             if log_context[field]:
                 log_entry[field] = log_context[field]
+
+    @staticmethod
+    def _inject_message_context(
+        log_entry: dict[str, Any], message_context: dict[str, Any]
+    ) -> None:
+        for field, value in message_context.items():
+            if value in (None, "", -1):
+                continue
+            log_entry[field] = value
 
     @staticmethod
     def _should_include_source_location(record: logging.LogRecord) -> bool:
@@ -207,10 +278,19 @@ class JSONFormatter(logging.Formatter):
         for field in self.EXTRA_FIELDS:
             value = getattr(record, field, None)
             if value is not None:
-                # First ensure correct type (prevents string coercion)
                 typed_value = self._ensure_type(field, value)
-                # Then sanitize URLs if needed
                 log_entry[field] = self._sanitize_value(field, typed_value)
+
+        for field, value in record.__dict__.items():
+            if (
+                field in _STANDARD_LOG_RECORD_FIELDS
+                or field in self.EXTRA_FIELDS
+                or field.startswith("_")
+                or value is None
+                or field in log_entry
+            ):
+                continue
+            log_entry[field] = self._sanitize_value(field, value)
 
     def _inject_exception(self, log_entry: dict[str, Any], record: logging.LogRecord) -> None:
         if not record.exc_info:
@@ -235,6 +315,10 @@ class JSONFormatter(logging.Formatter):
         # Inject context variables
         log_context = get_log_context()
         self._inject_context(log_entry, log_context)
+
+        # Inject message transport context
+        message_context = get_message_context()
+        self._inject_message_context(log_entry, message_context)
 
         # Note: Distributed tracing (OpenTracing) has been removed
 

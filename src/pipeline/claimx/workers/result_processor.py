@@ -307,9 +307,9 @@ class ClaimXResultProcessor:
                 "Failed to parse ClaimXUploadResultMessage",
                 error_category="permanent",
                 exc=e,
-                topic=record.topic,
-                partition=record.partition,
-                offset=record.offset,
+                message_topic=record.topic,
+                message_partition=record.partition,
+                message_offset=record.offset,
                 trace_id=record.key.decode("utf-8") if record.key else None,
             )
             record_processing_error(record.topic, self.consumer_group, "parse_error")
@@ -377,7 +377,10 @@ class ClaimXResultProcessor:
                 if self._batch and elapsed >= self.batch_timeout_seconds:
                     logger.debug(
                         "Batch timeout threshold reached, flushing",
-                        extra={"batch_size": len(self._batch), "elapsed": elapsed},
+                        extra={
+                            "batch_size": len(self._batch),
+                            "duration_ms": round(elapsed * 1000, 2),
+                        },
                     )
                     await self._flush_batch()
 

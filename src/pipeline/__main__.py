@@ -552,30 +552,46 @@ def _extract_eventhub_namespace(conn_str: str) -> str:
 
 def _display_eventhub_status(eventhub_enabled, eventhub_config):
     """Print EventHub logging status during startup."""
+    logger = logging.getLogger(__name__)
     if not eventhub_enabled:
         print("[STARTUP] EventHub logging: DISABLED")
+        logger.info("EventHub logging disabled")
         return
 
     if not eventhub_config:
         print(
             "[STARTUP] EventHub logging: ✗ NOT CONFIGURED (missing EVENTHUB_NAMESPACE_CONNECTION_STRING)"
         )
+        logger.warning("EventHub logging not configured")
         return
 
     conn_str = eventhub_config.get("connection_string", "")
     eventhub_name = eventhub_config.get("eventhub_name", "unknown")
     eventhub_namespace = _extract_eventhub_namespace(conn_str)
     print(f"[STARTUP] EventHub logs configured: {eventhub_namespace}/{eventhub_name}")
+    logger.info(
+        "EventHub logging configured",
+        extra={
+            "eventhub_name": eventhub_name,
+            "eventhub_namespace": eventhub_namespace,
+        },
+    )
 
     root_logger = logging.getLogger()
     has_eventhub_handler = any("EventHub" in type(h).__name__ for h in root_logger.handlers)
     if has_eventhub_handler:
         print("[STARTUP] EventHub log handler: ✓ ACTIVE")
+        logger.info("EventHub log handler active", extra={"eventhub_name": eventhub_name})
     else:
         print("[STARTUP] EventHub log handler: ✗ FAILED TO CREATE (check logs for errors)")
+        logger.warning(
+            "EventHub log handler failed to create",
+            extra={"eventhub_name": eventhub_name},
+        )
 
 
 def _display_startup_info(worker_id, log_to_stdout, eventhub_enabled, eventhub_config):
+    logger = logging.getLogger(__name__)
     log_output_mode = get_log_output_mode(
         log_to_stdout=log_to_stdout,
         enable_eventhub_logging=eventhub_enabled,
@@ -583,6 +599,14 @@ def _display_startup_info(worker_id, log_to_stdout, eventhub_enabled, eventhub_c
 
     print(f"[STARTUP] Log output mode: {log_output_mode}", flush=True)
     print(f"[STARTUP] Worker ID: {worker_id}", flush=True)
+    logger.info(
+        "Worker startup logging configured",
+        extra={
+            "worker_id": worker_id,
+            "log_output_mode": log_output_mode,
+            "eventhub_logging_enabled": eventhub_enabled,
+        },
+    )
     _display_eventhub_status(eventhub_enabled, eventhub_config)
 
 

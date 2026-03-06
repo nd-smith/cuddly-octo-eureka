@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from pipeline.common.log_fields import message_log_fields, producer_log_fields
 from pipeline.common.logging import extract_log_context, with_api_error_handling
 
 
@@ -89,6 +90,33 @@ class TestExtractLogContext:
         obj = MagicMock(spec=[])
         ctx = extract_log_context(obj)
         assert ctx == {}
+
+
+class TestLogFields:
+    def test_message_log_fields(self):
+        message = MagicMock(spec=["topic", "partition", "offset", "key"])
+        message.topic = "claimx-downloads-pending"
+        message.partition = 3
+        message.offset = 42
+        message.key = b"trace-123"
+
+        assert message_log_fields(message) == {
+            "message_topic": "claimx-downloads-pending",
+            "message_partition": 3,
+            "message_offset": 42,
+            "message_key": "trace-123",
+        }
+
+    def test_producer_log_fields(self):
+        metadata = MagicMock(spec=["partition", "offset"])
+        metadata.partition = 1
+        metadata.offset = 99
+
+        assert producer_log_fields("claimx-enriched", metadata) == {
+            "output_topic": "claimx-enriched",
+            "producer_partition": 1,
+            "producer_offset": 99,
+        }
 
 
 class TestWithApiErrorHandling:

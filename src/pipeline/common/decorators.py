@@ -4,7 +4,7 @@ from collections.abc import Callable
 from functools import wraps
 from typing import Any
 
-from core.logging.context import set_message_context
+from core.logging import MessageLogContext
 from pipeline.common.types import PipelineMessage
 
 
@@ -17,11 +17,11 @@ def set_log_context_from_message(func: Callable) -> Callable:
 
     @wraps(func)
     async def wrapper(self: Any, message: PipelineMessage, *args: Any, **kwargs: Any) -> Any:
-        set_message_context(
+        with MessageLogContext(
             topic=message.topic,
             partition=message.partition,
             offset=message.offset,
-        )
-        return await func(self, message, *args, **kwargs)
+        ):
+            return await func(self, message, *args, **kwargs)
 
     return wrapper
