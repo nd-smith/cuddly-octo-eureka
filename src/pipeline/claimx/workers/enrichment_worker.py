@@ -289,7 +289,7 @@ class ClaimXEnrichmentWorker:
             raise
 
     # Task IDs that route to the ITEL cabinet pending topic
-    ITEL_TASK_IDS = {32615, 1234}
+    ITEL_TASK_IDS = {32615, 24454}
     ITEL_PENDING_TOPIC = "pcesdopodappv1-itel-cabinet-pending"
     ITEL_CABINET_DAMAGE_QUESTION = "Kitchen cabinet damage present"
 
