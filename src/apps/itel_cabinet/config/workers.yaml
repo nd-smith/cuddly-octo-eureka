@@ -1,0 +1,135 @@
+# =============================================================================
+# iTel Cabinet Workers Configuration
+# =============================================================================
+# Simple, clear configuration - no handler framework magic.
+#
+# Single worker processes iTel cabinet events end-to-end:
+#   Tracking worker - Enriches, writes to Delta, transforms, sends to iTel API
+#
+# Architecture:
+#   Plugin → Kafka (pcesdopodappv1-itel-cabinet-pending)
+#                ↓
+#        Tracking Worker
+#        (Delta Table + iTel API)
+#                ↓
+#        Success/Error Topics + OneLake
+# =============================================================================
+
+workers:
+  # ===========================================================================
+  # iTel Cabinet Tracking Worker
+  # ===========================================================================
+  # Processes task events end-to-end: enriches COMPLETED tasks, writes to
+  # Delta tables, transforms to vendor format, sends to iTel API, and
+  # records results to success/error topics + OneLake.
+  #
+  # Startup:
+  #   python -m apps.itel_cabinet.tracking_worker
+  # ===========================================================================
+  itel_cabinet_tracking:
+    # Processing settings
+    processing:
+      health_port: 8096
+      health_enabled: true
+
+    # Transport settings (Event Hub or Kafka)
+    transport:
+      input_topic: pcesdopodappv1-itel-cabinet-pending
+      consumer_group: itel_cabinet_tracking_group
+
+    # Delta table paths (supports ${VAR} and ${VAR:-default} env var syntax)
+    delta_tables:
+      submissions_path: ${ITEL_DELTA_FORMS_TABLE:-abfss://7729c159-0674-42ba-abf7-a6756723c62f@onelake.dfs.fabric.microsoft.com/153b8535-fdd8-48c3-a792-a8a9f5539e2c/Tables/dbo/claimx_itel_forms}
+      attachments_path: ${ITEL_DELTA_ATTACHMENTS_TABLE:-abfss://7729c159-0674-42ba-abf7-a6756723c62f@onelake.dfs.fabric.microsoft.com/153b8535-fdd8-48c3-a792-a8a9f5539e2c/Tables/dbo/claimx_itel_attachments}
+
+    # Pipeline configuration
+    pipeline:
+      claimx_connection: claimx_api
+      output_topic: pcesdopodappv1-itel-cabinet-completed
+
+  # ===========================================================================
+  # iTel Cabinet API Configuration
+  # ===========================================================================
+  # API connection settings used by the tracking worker's ItelApiSender.
+  # ===========================================================================
+  itel_cabinet_api:
+    # Processing settings
+    processing:
+      health_port: 8097
+      health_enabled: true
+
+    # Transport settings (Event Hub or Kafka)
+    transport:
+      input_topic: pcesdopodappv1-itel-cabinet-completed
+      consumer_group: itel-cabinet-completed-pipeline
+
+    # iTel API settings
+    api:
+      connection: itel_cabinet_api
+
+      # Vendor-required identity fields (injected into API payload)
+      carrier_id: ${ITEL_CABINET_API_CARRIER_ID}
+      subscription_id: ${ITEL_CABINET_API_SUBSCRIPTION_ID}
+
+    # OneLake path for API result uploads
+    # Files land at: {base}/success/{YYYY}/{MM}/{DD}/{assignment_id}_{ts}.json
+    #            or: {base}/error/{YYYY}/{MM}/{DD}/{assignment_id}_{ts}.json
+    onelake:
+      results_path: ${ITEL_API_ONELAKE_RESULTS_PATH:-abfss://7729c159-0674-42ba-abf7-a6756723c62f@onelake.dfs.fabric.microsoft.com/153b8535-fdd8-48c3-a792-a8a9f5539e2c/Files/pcesdopodapp/logs/plugins/itel_cabinet_api/results}
+
+    # Output topics (topic_key references from config.yaml eventhub.plugins section)
+    output:
+      success_topic_key: itel_api_success
+      error_topic_key: itel_api_errors
+
+# =============================================================================
+# Environment Variables Required
+# =============================================================================
+# ClaimX API connection
+# export CLAIMX_API_URL="https://www.claimxperience.com/service/cxedirest"
+# export CLAIMX_API_TOKEN="your-claimx-basic-token"
+#
+# iTel API connection (required for API worker)
+# export ITEL_CABINET_API_BASE_URL="https://api.qa.itelinc.net/cabinet-repair-orv"
+# export ITEL_CABINET_API_CLIENT_ID="your-client-id"
+# export ITEL_CABINET_API_CLIENT_CREDENTIAL="your-client-credential"
+# export ITEL_CABINET_API_TOKEN_URL="https://login.microsoftonline.com/<tenant-id>/oauth2/v2.0/token"
+# export ITEL_CABINET_API_SCOPE="your-scope"
+# export ITEL_CABINET_API_CARRIER_ID="your-carrier-guid"
+# export ITEL_CABINET_API_SUBSCRIPTION_ID="your-subscription-id"
+#
+# Kafka connection
+# export KAFKA_BOOTSTRAP_SERVERS="localhost:9094"
+#
+# Delta tables (tracking worker) - can also be set directly in delta_tables config above
+# export ITEL_DELTA_FORMS_TABLE="abfss://workspace@onelake.dfs.fabric.microsoft.com/lakehouse/Tables/claimx_itel_forms"
+# export ITEL_DELTA_ATTACHMENTS_TABLE="abfss://workspace@onelake.dfs.fabric.microsoft.com/lakehouse/Tables/claimx_itel_attachments"
+#
+# =============================================================================
+# TESTING — Bypassing Upstream Deduplication
+# =============================================================================
+#
+# The ClaimX event ingester deduplicates by trace_id (SHA256 of message key).
+# Sending the same event twice through the ClaimX ingester will drop the second
+# copy, preventing it from reaching this worker.
+#
+# Option A — Direct injection (recommended for iTel API testing):
+#   Use tools/inject_itel_message.py to publish directly to the
+#   itel-cabinet-pending topic, bypassing the ClaimX ingester and dedup.
+#   A fresh UUID event_id is generated each run so the message is never blocked.
+#
+#   export EVENTHUB_NAMESPACE_CONNECTION_STRING="Endpoint=sb://..."
+#   python3 tools/inject_itel_message.py payload.json
+#   python3 tools/inject_itel_message.py payload.json --dry-run   # preview only
+#
+# Option B — Disable dedup for ClaimX ingester replays:
+#   Set this env var before starting the ClaimX event ingester to disable
+#   the in-memory + blob dedup check entirely. Re-enable before production.
+#
+#   export EVENTHUB_DEDUP_ENABLED=false
+#
+# Option C — Unique event IDs per replay:
+#   The dedup key is the Kafka/Event Hub message key. Sending the same payload
+#   with a different message key (or different event_id) will always pass through.
+#
+# =============================================================================

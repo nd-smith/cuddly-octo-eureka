@@ -1,0 +1,31 @@
+"type": verisk.claims.property.xn.status.reassigned,
+"version": 1,
+"utcDateTime": 2026-02-28T14:15:43.000Z,
+"traceId": 41cd3f22-43c0-4e89-8673-33aecd76bfed,
+"data": {
+	"description": "Reassigned",
+	"assignmentId": "06R2LZS",
+	"xnAddress": "ABLUO@ALLSTATE_XF",
+	"originalAssignmentId": "06PGBK9",
+	"dateTime": "2026-02-28T07:15:39.0000000Z",
+	"contact": {
+		"contactMethods": {
+			"phone": {
+				"type": "Office",
+				"number": "111-111-1111",
+				"extension": ""
+			},
+			"email": {
+				"address": "abluo@allstate.com"
+			}
+		},
+		"type": "ClaimRep",
+		"name": "Alexandra Blum"
+	},
+	"adm": {
+		"coverageLoss": {
+			"claimNumber": "0816170583"
+		}
+	}
+},
+"IngestionTime": 2026-02-28T14:15:43.4298299Z

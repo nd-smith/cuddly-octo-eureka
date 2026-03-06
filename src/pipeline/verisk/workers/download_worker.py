@@ -1,0 +1,965 @@
+"""
+Download worker for processing download tasks with concurrent processing.
+
+Consumes DownloadTaskMessage from pending and retry topics,
+downloads attachments using AttachmentDownloader, caches to local
+filesystem, and produces CachedDownloadMessage for upload worker.
+
+Architecture:
+- Downloads are cached locally before upload (decoupled from upload worker)
+- Upload worker consumes from downloads.cached topic
+- This allows independent scaling of download vs upload workers
+
+Concurrent Processing (WP-313):
+- Fetches batches of messages from Kafka
+- Processes downloads concurrently using asyncio.Semaphore
+- Uses HTTP connection pooling via shared aiohttp.ClientSession
+- Configurable concurrency via DOWNLOAD_CONCURRENCY (default: 10, max: 50)
+- Graceful shutdown waits for in-flight downloads to complete
+"""
+
+import asyncio
+import gc
+import logging
+import resource
+import shutil
+import tempfile
+import time
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+import aiohttp
+
+from config.config import MessageConfig
+from core.download.downloader import AttachmentDownloader
+from core.download.models import DownloadOutcome, DownloadTask
+from core.errors.exceptions import CircuitOpenError
+from core.logging.context import set_log_context
+from core.logging.periodic_logger import PeriodicStatsLogger
+from core.logging.utilities import format_cycle_output, log_worker_error
+from core.types import ErrorCategory
+from pipeline.common.decorators import set_log_context_from_message
+from pipeline.common.health import HealthCheckServer
+from pipeline.common.metrics import (
+    record_message_consumed,
+    record_processing_error,
+    update_assigned_partitions,
+    update_connection_status,
+    update_disk_usage,
+)
+from pipeline.common.stale_file_cleaner import StaleFileCleaner
+from pipeline.common.telemetry import initialize_worker_telemetry
+from pipeline.common.consumer_config import ConsumerConfig
+from pipeline.common.transport import create_batch_consumer, create_producer
+from pipeline.common.types import PipelineMessage
+from pipeline.verisk.retry.download_handler import RetryHandler
+from pipeline.verisk.schemas.cached import CachedDownloadMessage
+from pipeline.verisk.schemas.results import DownloadResultMessage
+from pipeline.verisk.schemas.tasks import DownloadTaskMessage
+from pipeline.verisk.handlers import FileHandlerRunner
+from pipeline.common.worker_defaults import (
+    BATCH_SIZE,
+    CONCURRENCY,
+    CYCLE_LOG_INTERVAL_SECONDS,
+)
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class TaskResult:
+    message: PipelineMessage
+    task_message: DownloadTaskMessage
+    outcome: DownloadOutcome
+    processing_time_ms: int
+    success: bool
+    error: Exception | None = None
+
+
+class DownloadWorker:
+    """
+    Worker that processes download tasks from Kafka with concurrent processing.
+
+    Consumes DownloadTaskMessage from:
+    - downloads.pending (new tasks from event ingester)
+    - downloads.retry.* (retried tasks with exponential backoff)
+
+    Architecture:
+    - Downloads files to local cache directory
+    - Produces CachedDownloadMessage to downloads.cached topic
+    - Upload Worker (separate) handles OneLake uploads
+    - This decoupling allows independent scaling of download vs upload
+
+    Concurrent Processing (WP-313 - FR-2.6):
+    - Fetches batches of messages using Kafka's getmany()
+    - Processes downloads concurrently with configurable parallelism
+    - Uses semaphore to control max concurrent downloads (default: 10)
+    - Shares HTTP connection pool across concurrent downloads
+    - Tracks in-flight downloads for graceful shutdown
+
+    For each task:
+    1. Parse DownloadTaskMessage from Kafka
+    2. Convert to DownloadTask for AttachmentDownloader
+    3. Download attachment to cache location (concurrent)
+    4. Produce CachedDownloadMessage to cached topic
+    5. Commit offsets after batch processing
+
+    Usage:
+        config = MessageConfig.from_env()
+        worker = DownloadWorker(config)
+        await worker.start()  # Runs until stopped
+        await worker.stop()
+    """
+
+    WORKER_NAME = "download_worker"
+
+    # Cycle output configuration
+    CYCLE_LOG_INTERVAL_SECONDS = CYCLE_LOG_INTERVAL_SECONDS
+
+    # Session rotation: recreate aiohttp session periodically to bound
+    # connector pool growth, DNS cache size, and SSL state accumulation.
+    SESSION_MAX_AGE_SECONDS = 7200  # 2 hours
+
+    # Run gc.collect() every N batches to break reference cycles and
+    # allow pymalloc arenas to be reclaimed.
+    GC_COLLECT_EVERY_N_BATCHES = 50
+
+    def __init__(
+        self,
+        config: MessageConfig,
+        domain: str = "verisk",
+        temp_dir: Path | None = None,
+        instance_id: str | None = None,
+    ):
+        self.config = config
+        self.domain = domain
+        self.instance_id = instance_id
+
+        # Create worker_id with instance suffix (ordinal) if provided
+        if instance_id:
+            self.worker_id = (
+                f"{self.WORKER_NAME}-{instance_id}"  # e.g., "download_worker-happy-tiger"
+            )
+        else:
+            self.worker_id = self.WORKER_NAME
+
+        self.temp_dir = (temp_dir or Path(tempfile.gettempdir()) / "pipeline_temp") / domain
+        self.temp_dir.mkdir(parents=True, exist_ok=True)
+
+        self.cache_dir = Path(config.cache_dir) / domain
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+
+        # Only consume from pending topic
+        # Unified retry scheduler handles routing retry messages back to pending
+        self.topics = [config.get_topic(domain, "downloads_pending")]
+
+        self._consumer = None
+        self._consumer_group: str | None = None
+        self._running = False
+        self._initialized = False
+
+        self.concurrency = CONCURRENCY
+        self.batch_size = BATCH_SIZE
+        self.timeout_seconds = 60
+
+        # Concurrency control (WP-313)
+        self._semaphore: asyncio.Semaphore | None = None
+        self._in_flight_tasks: set[str] = set()  # media_id tracking
+        self._in_flight_lock = asyncio.Lock()
+        self._shutdown_event: asyncio.Event | None = None
+
+        self._http_session: aiohttp.ClientSession | None = None
+        self._session_created_at: float = time.monotonic()
+        self._batch_count: int = 0
+
+        self.cached_topic = config.get_topic(domain, "downloads_cached")
+        self.results_topic = config.get_topic(domain, "downloads_results")
+
+        self.producer = create_producer(
+            config=config,
+            domain=domain,
+            worker_name=self.WORKER_NAME,
+            topic_key="downloads_cached",
+        )
+
+        self.results_producer = create_producer(
+            config=config,
+            domain=domain,
+            worker_name=self.WORKER_NAME,
+            topic_key="downloads_results",
+        )
+
+        self.handler_runner = FileHandlerRunner(
+            producer_factory=lambda topic_key: create_producer(
+                config=config,
+                domain=domain,
+                worker_name=self.WORKER_NAME,
+                topic_key=topic_key,
+            ),
+        )
+
+        self.downloader = AttachmentDownloader()
+
+        self.retry_handler: RetryHandler | None = None
+
+        # Health check server
+        health_port = 8090
+        self.health_server = HealthCheckServer(
+            port=health_port,
+            worker_name=self.WORKER_NAME,
+        )
+
+        # Cycle output tracking
+        self._records_processed = 0
+        self._records_succeeded = 0
+        self._records_failed = 0
+        self._bytes_downloaded = 0
+        self._cycle_offset_start_ts = None
+        self._cycle_offset_end_ts = None
+        self._stats_logger: PeriodicStatsLogger | None = None
+        self._stale_cleaner = StaleFileCleaner(
+            scan_dir=self.temp_dir,
+            in_flight_lock=self._in_flight_lock,
+            in_flight_tasks=self._in_flight_tasks,
+        )
+
+        logger.info(
+            "Initialized download worker with concurrent processing",
+            extra={
+                "domain": domain,
+                "worker_id": self.worker_id,
+                "worker_name": self.WORKER_NAME,
+                "instance_id": instance_id,
+                "consumer_group": config.get_consumer_group(domain, self.WORKER_NAME),
+                "topics": self.topics,
+                "temp_dir": str(self.temp_dir),
+                "cache_dir": str(self.cache_dir),
+                "download_concurrency": self.concurrency,
+                "download_batch_size": self.batch_size,
+            },
+        )
+
+    async def start(self) -> None:
+        """
+        Start the download worker with concurrent processing.
+        Runs until stop() is called or error occurs.
+        """
+        if self._running:
+            logger.warning("Worker already running, ignoring duplicate start call")
+            return
+
+        logger.info(
+            "Starting download worker with concurrent processing",
+            extra={
+                "download_concurrency": self.concurrency,
+                "download_batch_size": self.batch_size,
+            },
+        )
+
+        # Start health server first for immediate liveness probe response
+        await self.health_server.start()
+
+        initialize_worker_telemetry(self.domain, "download-worker")
+
+        self._semaphore = asyncio.Semaphore(self.concurrency)
+        self._shutdown_event = asyncio.Event()
+        self._in_flight_tasks = set()
+
+        # Close session from a previous failed start attempt to prevent leak
+        if self._http_session and not self._http_session.closed:
+            await self._http_session.close()
+            await asyncio.sleep(0)
+            self._http_session = None
+
+        self._http_session = self._create_http_session()
+        self.downloader = AttachmentDownloader(session=self._http_session)
+
+        await self.producer.start()
+
+        # Sync topic with producer's actual entity name (Event Hub entity may
+        # differ from the Kafka topic name resolved by get_topic()).
+        if hasattr(self.producer, "eventhub_name"):
+            self.cached_topic = self.producer.eventhub_name
+
+        await self.results_producer.start()
+
+        if hasattr(self.results_producer, "eventhub_name"):
+            self.results_topic = self.results_producer.eventhub_name
+
+        self.retry_handler = RetryHandler(self.config)
+        await self.retry_handler.start()
+
+        # Create batch consumer from transport layer
+        self._consumer = await create_batch_consumer(
+            config=self.config,
+            domain=self.domain,
+            worker_name=self.WORKER_NAME,
+            topics=self.topics,
+            batch_handler=self._process_batch,
+            topic_key="downloads_pending",
+            consumer_config=ConsumerConfig(
+                batch_size=self.batch_size,
+                batch_timeout_ms=1000,
+                instance_id=self.instance_id,
+            ),
+        )
+        self._consumer_group = self.config.get_consumer_group(self.domain, self.WORKER_NAME)
+
+        self._running = True
+        self._initialized = True
+
+        self._stats_logger = PeriodicStatsLogger(
+            interval_seconds=self.CYCLE_LOG_INTERVAL_SECONDS,
+            get_stats=self._get_cycle_stats,
+            stage="download",
+            worker_id=self.worker_id,
+        )
+        self._stats_logger.start()
+
+        self.health_server.set_ready(transport_connected=True)
+
+        # Update metrics
+        update_connection_status("consumer", connected=True)
+
+        await self._stale_cleaner.start()
+
+        logger.info(
+            "Download worker started successfully",
+            extra={
+                "topics": self.topics,
+            },
+        )
+
+        try:
+            await self._consumer.start()
+        except asyncio.CancelledError:
+            logger.info("Worker cancelled, shutting down")
+            raise
+        except Exception as e:
+            logger.error(
+                "Worker terminated with error",
+                extra={"error": str(e)},
+                exc_info=True,
+            )
+            raise
+        finally:
+            self._running = False
+
+    async def request_shutdown(self) -> None:
+        """
+        Request graceful shutdown after current batch completes.
+        Unlike stop(), this does not clean up resources immediately.
+        """
+        if not self._running:
+            logger.debug("Worker not running, shutdown request ignored")
+            return
+
+        logger.info("Graceful shutdown requested, will stop after current batch completes")
+        self._running = False
+
+    async def stop(self) -> None:
+        """
+        Stop the download worker and clean up resources.
+        Safe to call multiple times.
+        """
+        if self._consumer is None and self._http_session is None:
+            logger.debug("Worker already stopped")
+            return
+
+        logger.info("Stopping download worker, waiting for in-flight downloads")
+        self._running = False
+
+        if self._shutdown_event:
+            self._shutdown_event.set()
+
+        await self._close_resource("stats logger", self._stop_stats_logger)
+        await self._close_resource("stale cleaner", self._stale_cleaner.stop)
+        await self._close_resource("in-flight downloads", self._drain_in_flight)
+        await self._close_resource("consumer", self._stop_consumer, clear="_consumer")
+        await self._close_resource("HTTP session", self._close_http_session, clear="_http_session")
+        await self._close_resource("producer", self.producer.stop)
+        await self._close_resource("results producer", self.results_producer.stop)
+        await self._close_resource("handler runner", self.handler_runner.close)
+        await self._close_resource("retry handler", self._stop_retry_handler, clear="retry_handler")
+
+        await self.health_server.stop()
+        update_connection_status("consumer", connected=False)
+        update_assigned_partitions(self._consumer_group, 0)
+
+        logger.info("Download worker stopped successfully")
+
+    async def _close_resource(
+        self, name: str, method, *, clear: str | None = None
+    ) -> None:
+        try:
+            await method()
+        except asyncio.CancelledError:
+            logger.warning(f"Cancelled while stopping {name}")
+        except Exception as e:
+            logger.error(f"Error stopping {name}", extra={"error": str(e)}, exc_info=True)
+        finally:
+            if clear:
+                setattr(self, clear, None)
+
+    async def _stop_stats_logger(self) -> None:
+        if self._stats_logger:
+            await self._stats_logger.stop()
+
+    async def _drain_in_flight(self) -> None:
+        await self._wait_for_in_flight(timeout=30.0)
+
+    async def _stop_consumer(self) -> None:
+        if self._consumer:
+            await self._consumer.stop()
+
+    def _create_http_session(self) -> aiohttp.ClientSession:
+        """Create a new aiohttp session with standard connector and timeout config."""
+        connector = aiohttp.TCPConnector(
+            limit=100,
+            limit_per_host=10,
+            ttl_dns_cache=300,
+            enable_cleanup_closed=True,
+        )
+        timeout = aiohttp.ClientTimeout(
+            total=300,
+            connect=30,
+            sock_read=60,
+            sock_connect=30,
+        )
+        self._session_created_at = time.monotonic()
+        return aiohttp.ClientSession(connector=connector, timeout=timeout)
+
+    async def _maybe_rotate_session(self) -> None:
+        """Rotate the HTTP session if it has exceeded its max age."""
+        age = time.monotonic() - self._session_created_at
+        if age < self.SESSION_MAX_AGE_SECONDS:
+            return
+
+        logger.info(
+            "Rotating HTTP session to bound memory growth",
+            extra={"session_age_seconds": int(age)},
+        )
+        old_session = self._http_session
+        self._http_session = self._create_http_session()
+        self.downloader = AttachmentDownloader(session=self._http_session)
+
+        if old_session and not old_session.closed:
+            await old_session.close()
+            await asyncio.sleep(0)
+
+    async def _close_http_session(self) -> None:
+        if self._http_session:
+            await self._http_session.close()
+            await asyncio.sleep(0)
+
+    async def _stop_retry_handler(self) -> None:
+        if self.retry_handler:
+            await self.retry_handler.stop()
+
+    async def _wait_for_in_flight(self, timeout: float = 30.0) -> None:
+        start_time = time.perf_counter()
+        while True:
+            async with self._in_flight_lock:
+                count = len(self._in_flight_tasks)
+
+            if count == 0:
+                logger.info("All in-flight downloads completed")
+                return
+
+            elapsed = time.perf_counter() - start_time
+            if elapsed >= timeout:
+                logger.warning(
+                    "Timeout waiting for in-flight downloads",
+                    extra={
+                        "remaining_tasks": count,
+                        "timeout_seconds": timeout,
+                    },
+                )
+                return
+
+            logger.debug(
+                "Waiting for in-flight downloads",
+                extra={"remaining_tasks": count},
+            )
+            await asyncio.sleep(0.5)
+
+    async def _process_batch(self, messages: list[PipelineMessage]) -> bool:
+        """
+        Process batch of download messages concurrently.
+        Returns True to commit batch, False to skip commit (circuit breaker errors).
+        """
+        await self._maybe_rotate_session()
+
+        self._batch_count += 1
+        if self._batch_count % self.GC_COLLECT_EVERY_N_BATCHES == 0:
+            collected = gc.collect()
+            logger.debug(
+                "Periodic garbage collection",
+                extra={"gc_collected": collected, "batch_count": self._batch_count},
+            )
+
+        async def bounded_process(message: PipelineMessage) -> TaskResult:
+            async with self._semaphore:
+                return await self._process_single_task(message)
+
+        tasks = [bounded_process(msg) for msg in messages]
+        raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        processed_results = self._collect_results(messages, raw_results)
+        return self._tally_batch_results(messages, processed_results)
+
+    def _collect_results(
+        self, messages: list[PipelineMessage], raw_results: list
+    ) -> list[TaskResult | None]:
+        processed: list[TaskResult | None] = []
+        for i, result in enumerate(raw_results):
+            if isinstance(result, Exception):
+                message = messages[i]
+                logger.error(
+                    "Unhandled exception processing message",
+                    extra={
+                        "topic": message.topic,
+                        "partition": message.partition,
+                        "offset": message.offset,
+                        "error": str(result),
+                    },
+                    exc_info=result,
+                )
+                processed.append(None)
+            else:
+                processed.append(result)
+        return processed
+
+    def _tally_batch_results(
+        self, messages: list[PipelineMessage], results: list[TaskResult | None]
+    ) -> bool:
+        succeeded = 0
+        failed = 0
+        errors = 0
+        circuit_error_count = 0
+        for r in results:
+            if r is None:
+                errors += 1
+            elif r.success:
+                succeeded += 1
+            else:
+                failed += 1
+                if r.error and isinstance(r.error, CircuitOpenError):
+                    circuit_error_count += 1
+
+        logger.debug(
+            "Batch processing complete",
+            extra={
+                "batch_size": len(messages),
+                "records_succeeded": succeeded,
+                "records_failed": failed,
+                "records_errored": errors,
+                "circuit_errors": circuit_error_count,
+            },
+        )
+
+        self._records_succeeded += succeeded
+        self._records_failed += failed + errors
+
+        if circuit_error_count:
+            logger.warning(
+                "Circuit breaker errors in batch - not committing offsets",
+                extra={"circuit_error_count": circuit_error_count},
+            )
+            return False
+
+        return True
+
+    def _update_cycle_offsets(self, ts) -> None:
+        if self._cycle_offset_start_ts is None or ts < self._cycle_offset_start_ts:
+            self._cycle_offset_start_ts = ts
+        if self._cycle_offset_end_ts is None or ts > self._cycle_offset_end_ts:
+            self._cycle_offset_end_ts = ts
+
+    @set_log_context_from_message
+    async def _process_single_task(self, message: PipelineMessage) -> TaskResult:
+        start_time = time.perf_counter()
+
+        try:
+            task_message = DownloadTaskMessage.model_validate_json(message.value)
+        except Exception as e:
+            return self._make_parse_error_result(message, e, start_time)
+
+        set_log_context(trace_id=task_message.trace_id, media_id=task_message.media_id)
+
+        self._records_processed += 1
+        self._update_cycle_offsets(message.timestamp)
+
+        async with self._in_flight_lock:
+            self._in_flight_tasks.add(task_message.media_id)
+
+        try:
+            logger.info(
+                "Processing Xact download task",
+                extra={
+                    "trace_id": task_message.trace_id,
+                    "media_id": task_message.media_id,
+                    "assignment_id": task_message.assignment_id,
+                    "attachment_url": task_message.attachment_url,
+                    "destination_path": task_message.blob_path,
+                    "retry_count": task_message.retry_count,
+                    "topic": message.topic,
+                },
+            )
+
+            download_task = self._convert_to_download_task(task_message)
+            outcome = await self.downloader.download(download_task)
+            processing_time_ms = int((time.perf_counter() - start_time) * 1000)
+
+            record_message_consumed(
+                message.topic, self._consumer_group, len(message.value), success=outcome.success,
+            )
+
+            if outcome.success:
+                await self._handle_success(task_message, outcome, processing_time_ms)
+                self._bytes_downloaded += outcome.bytes_downloaded or 0
+                return TaskResult(
+                    message=message, task_message=task_message, outcome=outcome,
+                    processing_time_ms=processing_time_ms, success=True,
+                )
+
+            await self._handle_failure(task_message, outcome, processing_time_ms)
+            await self._cleanup_empty_temp_dir(download_task.destination.parent)
+
+            is_circuit_error = outcome.error_category == ErrorCategory.CIRCUIT_OPEN
+            return TaskResult(
+                message=message, task_message=task_message, outcome=outcome,
+                processing_time_ms=processing_time_ms, success=False,
+                error=(CircuitOpenError("download_worker", 60.0) if is_circuit_error else None),
+            )
+
+        finally:
+            async with self._in_flight_lock:
+                self._in_flight_tasks.discard(task_message.media_id)
+
+    def _make_parse_error_result(
+        self, message: PipelineMessage, error: Exception, start_time: float
+    ) -> TaskResult:
+        raw_preview = message.value[:1000].decode("utf-8", errors="replace") if message.value else ""
+        logger.error(
+            "Failed to parse DownloadTaskMessage",
+            extra={
+                "topic": message.topic,
+                "partition": message.partition,
+                "offset": message.offset,
+                "error": str(error),
+                "raw_payload_preview": raw_preview,
+                "raw_payload_bytes": len(message.value) if message.value else 0,
+            },
+            exc_info=True,
+        )
+        return TaskResult(
+            message=message,
+            task_message=None,  # type: ignore
+            outcome=DownloadOutcome(
+                success=False,
+                error_message=f"Failed to parse message: {error}",
+                error_category=ErrorCategory.PERMANENT,
+            ),
+            processing_time_ms=int((time.perf_counter() - start_time) * 1000),
+            success=False,
+            error=error,
+        )
+
+    def _convert_to_download_task(self, task_message: DownloadTaskMessage) -> DownloadTask:
+        destination_filename = Path(task_message.blob_path).name
+        temp_file = self.temp_dir / task_message.trace_id / destination_filename
+
+        return DownloadTask(
+            url=task_message.attachment_url,
+            destination=temp_file,
+            timeout=60,
+            validate_url=True,
+            validate_file_type=True,
+            check_expiration=True,  # Xact S3 URLs cannot be refreshed
+            allow_localhost=False,
+            allowed_domains=None,
+            allowed_extensions=None,
+            max_size=None,
+            skip_head=True,
+        )
+
+    async def _handle_success(
+        self,
+        task_message: DownloadTaskMessage,
+        outcome: DownloadOutcome,
+        processing_time_ms: int,
+    ) -> None:
+        if outcome.file_path is None:
+            raise ValueError("File path missing in successful outcome")
+
+        logger.info(
+            "Download completed successfully",
+            extra={
+                "trace_id": task_message.trace_id,
+                "attachment_url": task_message.attachment_url,
+                "bytes_downloaded": outcome.bytes_downloaded,
+                "content_type": outcome.content_type,
+                "processing_time_ms": processing_time_ms,
+                "local_path": str(outcome.file_path),
+            },
+        )
+
+        cache_subdir = self.cache_dir / task_message.trace_id
+        cache_subdir.mkdir(parents=True, exist_ok=True)
+
+        filename = Path(task_message.blob_path).name
+        cache_path = cache_subdir / filename
+
+        await asyncio.to_thread(shutil.move, str(outcome.file_path), str(cache_path))
+
+        logger.info(
+            "Cached file for upload",
+            extra={
+                "trace_id": task_message.trace_id,
+                "cache_path": str(cache_path),
+            },
+        )
+
+        # Don't eagerly remove the trace_id temp directory here.
+        # Other downloads for the same trace_id may still be writing to it.
+        # The stale file cleaner handles cleanup of empty temp directories.
+
+        # Run file handler if one is registered for this (status_subtype, file_type).
+        # Handler results are merged into metadata; side-effect messages (e.g.
+        # reinspection events) are produced by the runner. Failures are non-fatal.
+        handler_metadata = await self.handler_runner.run(task_message, cache_path)
+
+        cached_message = CachedDownloadMessage(
+            media_id=task_message.media_id,
+            trace_id=task_message.trace_id,
+            attachment_url=task_message.attachment_url,
+            destination_path=task_message.blob_path,
+            local_cache_path=str(cache_path),
+            bytes_downloaded=outcome.bytes_downloaded or 0,
+            content_type=outcome.content_type,
+            event_type=task_message.event_type,
+            event_subtype=task_message.event_subtype,
+            status_subtype=task_message.status_subtype,
+            file_type=task_message.file_type,
+            assignment_id=task_message.assignment_id,
+            original_timestamp=task_message.original_timestamp,
+            downloaded_at=datetime.now(UTC),
+            metadata={**task_message.metadata, **handler_metadata},
+        )
+
+        await self.producer.send(
+            value=cached_message,
+            key=task_message.trace_id,
+        )
+
+        logger.info(
+            "Produced cached download message",
+            extra={
+                "trace_id": task_message.trace_id,
+                "topic": self.cached_topic,
+                "cache_path": str(cache_path),
+            },
+        )
+
+    async def _handle_failure(
+        self,
+        task_message: DownloadTaskMessage,
+        outcome: DownloadOutcome,
+        processing_time_ms: int,
+    ) -> None:
+        """
+        Route failures based on error category:
+        - CIRCUIT_OPEN: Don't process (retried on next poll)
+        - PERMANENT: DLQ (no retry)
+        - TRANSIENT/AUTH/UNKNOWN: Retry topic
+        """
+        if self.retry_handler is None:
+            raise RuntimeError("RetryHandler not initialized - call start() first")
+
+        error_category = outcome.error_category or ErrorCategory.UNKNOWN
+
+        log_worker_error(
+            logger,
+            outcome.error_message or "Download failed",
+            error_category=error_category.value,
+            trace_id=task_message.trace_id,
+            attachment_url=task_message.attachment_url,
+            status_code=outcome.status_code,
+            processing_time_ms=processing_time_ms,
+            retry_count=task_message.retry_count,
+        )
+
+        record_processing_error(
+            self.config.get_topic(self.domain, "downloads_pending"),
+            self._consumer_group,
+            error_category.value,
+        )
+
+        if error_category == ErrorCategory.CIRCUIT_OPEN:
+            logger.warning(
+                "Circuit breaker open - will reprocess on next poll",
+                extra={
+                    "trace_id": task_message.trace_id,
+                    "attachment_url": task_message.attachment_url,
+                },
+            )
+            if outcome.file_path:
+                await self._cleanup_temp_file(outcome.file_path)
+            return
+
+        try:
+            error_message = outcome.error_message or "Download failed"
+            error = Exception(error_message)
+
+            await self.retry_handler.handle_failure(
+                task=task_message,
+                error=error,
+                error_category=error_category,
+            )
+
+            logger.debug(
+                "Routed failed task through retry handler",
+                extra={
+                    "trace_id": task_message.trace_id,
+                    "error_category": error_category.value,
+                    "retry_count": task_message.retry_count,
+                },
+            )
+
+        except Exception as e:
+            logger.error(
+                "Failed to route task through retry handler",
+                extra={
+                    "trace_id": task_message.trace_id,
+                    "error": str(e),
+                },
+                exc_info=True,
+            )
+
+        status = "failed_permanent" if error_category == ErrorCategory.PERMANENT else "failed"
+
+        result_message = DownloadResultMessage(
+            media_id=task_message.media_id,
+            trace_id=task_message.trace_id,
+            attachment_url=task_message.attachment_url,
+            blob_path=task_message.blob_path,
+            status_subtype=task_message.status_subtype,
+            file_type=task_message.file_type,
+            assignment_id=task_message.assignment_id,
+            status=status,
+            bytes_downloaded=0,
+            error_message=outcome.error_message,
+            retry_count=task_message.retry_count,
+            created_at=datetime.now(UTC),
+        )
+
+        await self.results_producer.send(
+            value=result_message,
+            key=task_message.trace_id,
+        )
+
+        logger.info(
+            "Produced failure result message",
+            extra={
+                "trace_id": task_message.trace_id,
+                "status": status,
+                "topic": self.results_topic,
+            },
+        )
+
+        if outcome.file_path:
+            await self._cleanup_temp_file(outcome.file_path)
+
+    async def _cleanup_temp_file(self, file_path: Path) -> None:
+        try:
+
+            def _delete() -> None:
+                if file_path.exists():
+                    file_path.unlink()
+                    logger.debug(
+                        "Deleted temporary file",
+                        extra={"file_path": str(file_path)},
+                    )
+
+                parent = file_path.parent
+                if parent.exists() and not any(parent.iterdir()):
+                    parent.rmdir()
+                    logger.debug(
+                        "Deleted empty temporary directory",
+                        extra={"directory": str(parent)},
+                    )
+
+            await asyncio.to_thread(_delete)
+
+        except Exception as e:
+            logger.warning(
+                "Failed to clean up temporary file",
+                extra={
+                    "file_path": str(file_path),
+                    "error": str(e),
+                },
+            )
+
+    async def _cleanup_empty_temp_dir(self, dir_path: Path) -> None:
+        try:
+
+            def _delete_if_empty() -> None:
+                if dir_path.exists() and dir_path.is_dir() and not any(dir_path.iterdir()):
+                    dir_path.rmdir()
+                    logger.debug(
+                        "Deleted empty temporary directory after failed download",
+                        extra={"directory": str(dir_path)},
+                    )
+
+            await asyncio.to_thread(_delete_if_empty)
+
+        except Exception as e:
+            logger.warning(
+                "Failed to clean up empty temporary directory",
+                extra={
+                    "directory": str(dir_path),
+                    "error": str(e),
+                },
+            )
+
+    def _get_cycle_stats(self, cycle_count: int) -> tuple[str, dict[str, Any]]:
+        """Get cycle statistics for periodic logging."""
+        update_disk_usage(str(self.temp_dir))
+        update_disk_usage(str(self.cache_dir))
+
+        # ru_maxrss is in KB on Linux
+        rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024
+
+        msg = format_cycle_output(
+            cycle_count=cycle_count,
+            succeeded=self._records_succeeded,
+            failed=self._records_failed,
+        )
+        extra = {
+            "records_processed": self._records_processed,
+            "records_succeeded": self._records_succeeded,
+            "records_failed": self._records_failed,
+            "bytes_downloaded": self._bytes_downloaded,
+            "rss_mb": rss_mb,
+            "in_flight": len(self._in_flight_tasks),
+            "stale_files_removed": self._stale_cleaner.total_removed,
+            "cycle_offset_start_ts": self._cycle_offset_start_ts,
+            "cycle_offset_end_ts": self._cycle_offset_end_ts,
+        }
+        self._cycle_offset_start_ts = None
+        self._cycle_offset_end_ts = None
+        return msg, extra
+
+    @property
+    def is_running(self) -> bool:
+        return self._running
+
+    @property
+    def in_flight_count(self) -> int:
+        return len(self._in_flight_tasks)
+
+
+__all__ = ["DownloadWorker"]

@@ -1,0 +1,198 @@
+"""Verisk domain worker runners.
+
+Contains all runner functions for XACT pipeline workers:
+- Event ingestion (Event Hub)
+- Enrichment
+- Download/Upload
+- Delta writes
+- Result processing
+- Retry scheduling
+"""
+
+import asyncio
+import logging
+from pathlib import Path
+
+from pipeline.runners.common import (
+    execute_worker_with_producer,
+    execute_worker_with_shutdown,
+)
+
+logger = logging.getLogger(__name__)
+
+
+async def run_event_ingester(
+    eventhub_config,
+    local_kafka_config,
+    shutdown_event: asyncio.Event,
+    domain: str = "verisk",
+    instance_id: int | None = None,
+):
+    """Reads events from Event Hub and produces download tasks to local Kafka.
+    Delta Lake writes are handled by a separate DeltaEventsWorker."""
+    from pipeline.verisk.workers.event_ingester import EventIngesterWorker
+
+    worker = EventIngesterWorker(
+        config=eventhub_config,
+        domain=domain,
+        producer_config=local_kafka_config,
+        instance_id=instance_id,
+    )
+    await execute_worker_with_shutdown(
+        worker,
+        stage_name="xact-event-ingester",
+        shutdown_event=shutdown_event,
+        instance_id=instance_id,
+    )
+
+
+async def run_delta_events_worker(
+    kafka_config,
+    events_table_path: str,
+    shutdown_event: asyncio.Event,
+    instance_id: int | None = None,
+):
+    """Consumes enrichment tasks from enrichment_pending and writes to xact_events Delta table.
+    Downstream of event ingester deduplication."""
+    from pipeline.verisk.workers.delta_events_worker import DeltaEventsWorker
+
+    await execute_worker_with_producer(
+        worker_class=DeltaEventsWorker,
+        kafka_config=kafka_config,
+        domain="verisk",
+        stage_name="xact-delta-writer",
+        shutdown_event=shutdown_event,
+        worker_kwargs={"events_table_path": events_table_path},
+        producer_worker_name="delta_events_writer",
+        instance_id=instance_id,
+    )
+
+
+async def run_xact_retry_scheduler(
+    kafka_config,
+    shutdown_event: asyncio.Event,
+    instance_id: int | None = None,
+):
+    """Unified retry scheduler for all XACT retry types.
+    Routes messages from xact.retry topic to target topics based on headers."""
+    from pipeline.common.retry.unified_scheduler import UnifiedRetryScheduler
+
+    scheduler = UnifiedRetryScheduler(
+        config=kafka_config,
+        domain="verisk",
+        target_topic_keys=["downloads_pending", "enrichment_pending", "downloads_results"],
+        persistence_dir=kafka_config.retry_persistence_dir,
+    )
+    await execute_worker_with_shutdown(
+        scheduler,
+        stage_name="xact-retry-scheduler",
+        shutdown_event=shutdown_event,
+        instance_id=instance_id,
+    )
+
+
+async def run_xact_enrichment_worker(
+    kafka_config,
+    shutdown_event: asyncio.Event,
+    instance_id: int | None = None,
+):
+    """Run XACT enrichment worker with plugin-based enrichment."""
+    from pipeline.verisk.workers.enrichment_worker import XACTEnrichmentWorker
+
+    worker = XACTEnrichmentWorker(
+        config=kafka_config,
+        domain="verisk",
+        instance_id=instance_id,
+    )
+
+    await execute_worker_with_shutdown(
+        worker,
+        stage_name="xact-enricher",
+        shutdown_event=shutdown_event,
+        instance_id=instance_id,
+    )
+
+
+async def run_download_worker(
+    kafka_config,
+    shutdown_event: asyncio.Event,
+    instance_id: int | None = None,
+):
+    """Download files from external sources."""
+    from pipeline.verisk.workers.download_worker import DownloadWorker
+
+    worker = DownloadWorker(
+        config=kafka_config,
+        domain="verisk",
+        temp_dir=Path(kafka_config.temp_dir),
+        instance_id=instance_id,
+    )
+    await execute_worker_with_shutdown(
+        worker,
+        stage_name="xact-download",
+        shutdown_event=shutdown_event,
+        instance_id=instance_id,
+    )
+
+
+async def run_upload_worker(
+    kafka_config,
+    shutdown_event: asyncio.Event,
+    instance_id: int | None = None,
+):
+    """Upload cached files to storage."""
+    from pipeline.verisk.workers.upload_worker import UploadWorker
+
+    worker = UploadWorker(config=kafka_config, domain="verisk", instance_id=instance_id)
+
+    await execute_worker_with_shutdown(
+        worker,
+        stage_name="xact-upload",
+        shutdown_event=shutdown_event,
+        instance_id=instance_id,
+    )
+
+
+async def run_result_processor(
+    kafka_config,
+    shutdown_event: asyncio.Event,
+    enable_delta_writes: bool = True,
+    inventory_table_path: str = "",
+    failed_table_path: str = "",
+    instance_id: int | None = None,
+):
+    """Reads download results and writes to Delta Lake tables.
+    On Delta write failure, batches are routed to retry topics."""
+    from core.logging.context import set_log_context
+    from pipeline.verisk.workers.result_processor import ResultProcessor
+
+    set_log_context(stage="xact-result-processor")
+    logger.info("Starting xact Result Processor worker...")
+
+    if enable_delta_writes and not inventory_table_path:
+        logger.error(
+            "inventory_table_path is required for xact-result-processor "
+            "when enable_delta_writes=True. Configure via VERISK_INVENTORY_TABLE_PATH "
+            "environment variable or delta.verisk.inventory_table_path in config.yaml."
+        )
+        raise ValueError("inventory_table_path is required when delta writes are enabled")
+
+    await execute_worker_with_producer(
+        worker_class=ResultProcessor,
+        kafka_config=kafka_config,
+        domain="verisk",
+        stage_name="xact-result-processor",
+        shutdown_event=shutdown_event,
+        worker_kwargs={
+            "inventory_table_path": (inventory_table_path if enable_delta_writes else None),
+            "failed_table_path": (
+                failed_table_path if enable_delta_writes and failed_table_path else None
+            ),
+            "batch_size": 2000,
+            "batch_timeout_seconds": 5.0,
+        },
+        producer_worker_name="result_processor",
+        instance_id=instance_id,
+    )
+
+

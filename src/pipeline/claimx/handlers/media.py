@@ -1,0 +1,362 @@
+"""
+Media event handler.
+
+Handles: PROJECT_FILE_ADDED
+"""
+
+import asyncio
+import logging
+from collections import defaultdict
+from datetime import UTC, datetime
+
+from core.types import ErrorCategory
+from pipeline.claimx.api_client import ClaimXApiError
+from pipeline.claimx.handlers import transformers
+from pipeline.claimx.handlers.base import (
+    EnrichmentResult,
+    EventHandler,
+    HandlerResult,
+    aggregate_results,
+    register_handler,
+)
+from pipeline.claimx.handlers.utils import (
+    LOG_ERROR_TRUNCATE_SHORT,
+    elapsed_ms,
+    safe_int,
+)
+from pipeline.claimx.schemas.entities import EntityRowsMessage
+from pipeline.claimx.schemas.events import ClaimXEventMessage
+from pipeline.common.logging import extract_log_context
+
+logger = logging.getLogger(__name__)
+
+# Batch threshold for triggering pre-flight project verification
+# Reduces API calls while ensuring projects exist before processing attachments
+BATCH_THRESHOLD = 5
+
+
+@register_handler
+class MediaHandler(EventHandler):
+    """
+    Handler for media events.
+
+    Fetches media metadata and extracts:
+    - Media row → claimx_media_metadata
+
+    Supports batching by project_id to minimize API calls.
+    """
+
+    event_types = ["PROJECT_FILE_ADDED"]
+    HANDLER_NAME = "media"
+
+    async def process(self, events: list[ClaimXEventMessage]) -> HandlerResult:
+        """Process media events grouped by project_id for batch optimization."""
+        if not events:
+            return HandlerResult(
+                handler_name=self.name,
+                total=0,
+                succeeded=0,
+                failed=0,
+                failed_permanent=0,
+                skipped=0,
+                rows=EntityRowsMessage(),
+                errors=[],
+                duration_seconds=0.0,
+                api_calls=0,
+            )
+
+        start_time = datetime.now(UTC)
+
+        # Group by project_id
+        groups: dict[str | None, list[ClaimXEventMessage]] = defaultdict(list)
+        for event in events:
+            groups[event.project_id].append(event)
+
+        logger.debug(
+            "Processing batched media events",
+            extra={
+                "handler_name": self.name,
+                "total_events": len(events),
+                "group_count": len(groups),
+                "group_sizes": {str(k): len(v) for k, v in groups.items()},
+            },
+        )
+
+        # Process all project groups concurrently
+        async def process_group(key, group_events):
+            return key, await self.handle_batch(group_events)
+
+        tasks = [process_group(k, evts) for k, evts in groups.items()]
+        group_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        results = []
+        groups_succeeded = 0
+        groups_failed = 0
+
+        for group_result in group_results:
+            if isinstance(group_result, Exception):
+                groups_failed += 1
+                logger.error(
+                    "Batch group processing failed",
+                    extra={"handler_name": self.name},
+                    exc_info=True,
+                )
+                continue
+            _key, batch_results = group_result
+            groups_succeeded += 1
+            results.extend(batch_results)
+
+        logger.debug(
+            "Batched processing complete",
+            extra={
+                "handler_name": self.name,
+                "groups_succeeded": groups_succeeded,
+                "groups_failed": groups_failed,
+                "total_results": len(results),
+            },
+        )
+
+        handler_result = aggregate_results(self.name, results, start_time)
+
+        logger.debug(
+            "Handler processing complete",
+            extra={
+                "handler_name": self.name,
+                "records_processed": handler_result.total,
+                "records_succeeded": handler_result.succeeded,
+                "records_failed": handler_result.failed,
+                "records_failed_permanent": handler_result.failed_permanent,
+                "api_calls": handler_result.api_calls,
+                "duration_seconds": round(handler_result.duration_seconds, 3),
+            },
+        )
+
+        return handler_result
+
+    @staticmethod
+    def _normalize_media_response(response) -> list[dict]:
+        """Normalize API response to a list of media dicts."""
+        if isinstance(response, list):
+            media_list = response
+        elif isinstance(response, dict):
+            media_list = response.get("data", [])
+        else:
+            media_list = []
+
+        if not isinstance(media_list, list):
+            media_list = [media_list] if media_list else []
+        return media_list
+
+    def _build_batch_error_results(
+        self, events: list[ClaimXEventMessage], error: Exception,
+        error_category: ErrorCategory, is_retryable: bool, duration: int,
+    ) -> list[EnrichmentResult]:
+        """Build error results for all events in a failed batch."""
+        return [
+            EnrichmentResult(
+                event=event,
+                success=False,
+                error=str(error),
+                error_category=error_category,
+                is_retryable=is_retryable,
+                api_calls=2 if i == 0 else 0,
+                duration_ms=duration if i == 0 else 0,
+            )
+            for i, event in enumerate(events)
+        ]
+
+    def _log_and_build_error_results(
+        self,
+        events: list[ClaimXEventMessage],
+        e: Exception,
+        project_id: str,
+        media_ids: list[str],
+        duration: int,
+    ) -> list[EnrichmentResult]:
+        """Log a batch error and return error results for all events."""
+        if isinstance(e, ClaimXApiError):
+            logger.warning(
+                "API error for project media",
+                extra={
+                    "handler_name": MediaHandler.HANDLER_NAME,
+                    "project_id": project_id,
+                    "media_ids": media_ids,
+                    "error_message": str(e)[:LOG_ERROR_TRUNCATE_SHORT],
+                    "error_category": e.category.value if e.category else None,
+                    "http_status": e.status_code,
+                    "is_retryable": e.is_retryable,
+                },
+            )
+            return self._build_batch_error_results(
+                events, e, e.category, e.is_retryable, duration,
+            )
+        logger.error(
+            "Unexpected error for project media",
+            extra={
+                "handler_name": MediaHandler.HANDLER_NAME,
+                "project_id": project_id,
+                "media_ids": media_ids,
+            },
+            exc_info=True,
+        )
+        return self._build_batch_error_results(
+            events, e, ErrorCategory.TRANSIENT, True, duration,
+        )
+
+    async def handle_batch(self, events: list[ClaimXEventMessage]) -> list[EnrichmentResult]:
+        """Process batch of media events for same project."""
+        if not events:
+            return []
+
+        project_id = events[0].project_id
+        media_ids = [event.media_id for event in events if event.media_id]
+        start_time = datetime.now(UTC)
+
+        try:
+            media_by_id = await self._fetch_media_by_id(int(project_id), media_ids)
+
+            project_rows = await self.ensure_project_exists(
+                int(project_id),
+                trace_id=events[0].trace_id,
+            )
+
+            pid = int(project_id)
+
+            # First event carries project rows and API call count
+            first = self._process_single_event(
+                events[0], media_by_id, pid, start_time,
+                project_rows=project_rows, api_calls=2,
+            )
+            results = [first] + [
+                self._process_single_event(
+                    event, media_by_id, pid, start_time,
+                    project_rows=None, api_calls=0,
+                )
+                for event in events[1:]
+            ]
+
+            succeeded = sum(1 for r in results if r.success)
+            total_media_rows = sum(
+                len(r.rows.media) for r in results if r.rows
+            )
+
+            logger.debug(
+                "Handler complete",
+                extra={
+                    "handler_name": MediaHandler.HANDLER_NAME,
+                    "project_id": project_id,
+                    "media_ids": media_ids,
+                    "events_count": len(events),
+                    "media_count": total_media_rows,
+                    "succeeded": succeeded,
+                    "failed": len(results) - succeeded,
+                    "project_verification": bool(project_rows.projects),
+                },
+            )
+
+            return results
+
+        except Exception as e:
+            return self._log_and_build_error_results(
+                events, e, project_id, media_ids, elapsed_ms(start_time),
+            )
+
+    async def _fetch_media_by_id(
+        self, project_id: int, media_ids: list[str],
+    ) -> dict[int, dict]:
+        """Fetch media from API and return a dict keyed by media ID."""
+        fetch_strategy = "selective" if len(media_ids) <= BATCH_THRESHOLD else "full"
+        logger.debug(
+            "Media fetch strategy selected",
+            extra={
+                "handler_name": MediaHandler.HANDLER_NAME,
+                "project_id": project_id,
+                "media_count": len(media_ids),
+                "media_ids": media_ids,
+                "fetch_strategy": fetch_strategy,
+                "threshold": BATCH_THRESHOLD,
+            },
+        )
+
+        if len(media_ids) <= BATCH_THRESHOLD:
+            response = await self.client.get_project_media(
+                project_id,
+                media_ids=[int(m) for m in media_ids if m],
+            )
+        else:
+            response = await self.client.get_project_media(project_id)
+
+        media_list = self._normalize_media_response(response)
+
+        media_by_id: dict[int, dict] = {}
+        for media in media_list:
+            mid = safe_int(media.get("mediaID"))
+            if mid is not None:
+                media_by_id[mid] = media
+        return media_by_id
+
+    def _process_single_event(
+        self,
+        event: ClaimXEventMessage,
+        media_by_id: dict[int, dict],
+        project_id: int,
+        batch_start_time: datetime,
+        project_rows: EntityRowsMessage | None = None,
+        api_calls: int = 0,
+    ) -> EnrichmentResult:
+        """Process single event using pre-fetched media data."""
+        rows = EntityRowsMessage()
+
+        media_id_int = safe_int(event.media_id) if event.media_id else None
+        media_data = media_by_id.get(media_id_int) if media_id_int else None
+
+        if media_data:
+            media_row = transformers.media_to_row(
+                media_data,
+                project_id=project_id,
+                trace_id=event.trace_id,
+            )
+            if media_row.get("media_id") is not None:
+                rows.media.append(media_row)
+
+            if project_rows:
+                rows.merge(project_rows)
+
+            return EnrichmentResult(
+                event=event,
+                success=True,
+                rows=rows,
+                api_calls=api_calls,
+                duration_ms=0,
+            )
+        else:
+            logger.warning(
+                "Media not found in API response",
+                extra={
+                    **extract_log_context(event),
+                },
+            )
+            return EnrichmentResult(
+                event=event,
+                success=False,
+                error=f"Media {event.media_id} not found in API response",
+                error_category=ErrorCategory.PERMANENT,
+                is_retryable=False,
+                api_calls=api_calls,
+                duration_ms=0,
+            )
+
+    async def handle_event(self, event: ClaimXEventMessage) -> EnrichmentResult:
+        """Handle single media event (fallback if not batched)."""
+        results = await self.handle_batch([event])
+        return (
+            results[0]
+            if results
+            else EnrichmentResult(
+                event=event,
+                success=False,
+                error="No result from batch handler",
+                error_category=ErrorCategory.TRANSIENT,
+                is_retryable=True,
+            )
+        )

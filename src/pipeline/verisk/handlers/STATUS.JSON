@@ -1,0 +1,31 @@
+"type": verisk.claims.property.xn.status.delivered,
+"version": 1,
+"utcDateTime": 2026-01-01T00:00:00.000Z,
+"traceId": 00000000-0000-0000-0000-000000000000,
+"data": {
+	"description": "Delivered",
+	"assignmentId": "AAAAAAA",
+	"xnAddress": "EXAMPLE@CARRIER_XF",
+	"originalAssignmentId": "BBBBBBB",
+	"dateTime": "2026-01-01T00:00:00.0000000Z",
+	"contact": {
+		"contactMethods": {
+			"phone": {
+				"type": "Office",
+				"number": "000-000-0000",
+				"extension": ""
+			},
+			"email": {
+				"address": "adjuster@example.com"
+			}
+		},
+		"type": "ClaimRep",
+		"name": "Jane Smith"
+	},
+	"adm": {
+		"coverageLoss": {
+			"claimNumber": "0000000000"
+		}
+	}
+},
+"IngestionTime": 2026-01-01T00:00:01.000000Z

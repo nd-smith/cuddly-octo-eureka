@@ -1,0 +1,305 @@
+"""
+Streaming download support for large files with memory bounds.
+
+Provides chunked streaming functionality to handle files larger than
+available memory. Extracts streaming logic from xact_download.py to be
+reusable across pipeline components.
+"""
+
+import asyncio
+import random
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from pathlib import Path
+
+import aiohttp
+
+from core.download.http_client import DownloadError, RETRYABLE_STATUSES
+from core.errors.exceptions import (
+    ErrorCategory,
+    classify_http_status,
+    classify_os_error,
+)
+
+# Download configuration constants
+# 8MB chunks: balance between memory usage and throughput for network I/O
+CHUNK_SIZE = 8 * 1024 * 1024
+# 50MB threshold: files larger than this use streaming to avoid memory issues
+STREAM_THRESHOLD = 50 * 1024 * 1024
+
+# Unified with DownloadError — structurally identical
+StreamDownloadError = DownloadError
+
+
+@dataclass
+class StreamDownloadResponse:
+    """Response from streaming HTTP download with chunk iterator."""
+
+    status_code: int
+    content_length: int | None
+    content_type: str | None
+    chunk_iterator: AsyncIterator[bytes]
+
+
+def _classify_connection_error(e: Exception, sock_read_timeout: int) -> StreamDownloadError:
+    """Build a StreamDownloadError from a connection/timeout exception."""
+    if isinstance(e, TimeoutError):
+        return StreamDownloadError(
+            status_code=None,
+            error_message=f"Download timeout (sock_read={sock_read_timeout}s)",
+            error_category=ErrorCategory.TRANSIENT,
+        )
+    if isinstance(e, aiohttp.ServerTimeoutError):
+        return StreamDownloadError(
+            status_code=None,
+            error_message=f"Server timeout: {str(e)}",
+            error_category=ErrorCategory.TRANSIENT,
+        )
+    return StreamDownloadError(
+        status_code=None,
+        error_message=f"Connection error: {str(e)}",
+        error_category=ErrorCategory.TRANSIENT,
+    )
+
+
+async def _backoff_sleep(attempt: int) -> None:
+    """Jittered exponential backoff for stream download retries."""
+    await asyncio.sleep(min(2, 0.5 * 2**attempt) + random.random())
+
+
+async def _attempt_stream_download(
+    url: str,
+    session: aiohttp.ClientSession,
+    timeout: int | None,
+    chunk_size: int,
+    allow_redirects: bool,
+    sock_read_timeout: int,
+) -> tuple[StreamDownloadResponse | None, StreamDownloadError | None]:
+    """Execute a single stream download attempt.
+
+    Returns (response, None) on success, (None, error) on HTTP error,
+    or raises on connection/timeout errors.
+    """
+    response_ctx = session.get(
+        url,
+        timeout=aiohttp.ClientTimeout(total=timeout, sock_read=sock_read_timeout),
+        allow_redirects=allow_redirects,
+    )
+
+    response = await response_ctx.__aenter__()
+
+    if response.status != 200:
+        error_category = classify_http_status(response.status)
+        await response_ctx.__aexit__(None, None, None)
+        return None, StreamDownloadError(
+            status_code=response.status,
+            error_message=f"HTTP {response.status}",
+            error_category=error_category,
+        )
+
+    content_length = response.content_length
+    content_type = response.headers.get("Content-Type")
+
+    async def chunk_iterator() -> AsyncIterator[bytes]:
+        try:
+            async for chunk in response.content.iter_chunked(chunk_size):
+                yield chunk
+        finally:
+            await response_ctx.__aexit__(None, None, None)
+
+    return (
+        StreamDownloadResponse(
+            status_code=response.status,
+            content_length=content_length,
+            content_type=content_type,
+            chunk_iterator=chunk_iterator(),
+        ),
+        None,
+    )
+
+
+async def stream_download_url(
+    url: str,
+    session: aiohttp.ClientSession,
+    timeout: int | None = None,
+    chunk_size: int = CHUNK_SIZE,
+    allow_redirects: bool = True,
+    sock_read_timeout: int = 30,
+) -> tuple[StreamDownloadResponse | None, StreamDownloadError | None]:
+    """
+    Stream download for large files using chunked reading.
+
+    Returns async iterator for memory-efficient processing. Does NOT handle
+    URL validation, circuit breaking, retry logic, or temp file management.
+
+    Args:
+        url: URL to download
+        session: aiohttp ClientSession (caller manages lifecycle)
+        timeout: Total timeout in seconds
+        chunk_size: Chunk size in bytes
+        allow_redirects: Whether to follow redirects (needed for S3 presigned URLs)
+        sock_read_timeout: Socket read timeout to prevent hanging on stalled connections
+
+    Returns:
+        Tuple of (StreamDownloadResponse, None) on success or (None, StreamDownloadError)
+    """
+    max_attempts = 3
+    last_error = None
+
+    for attempt in range(max_attempts):
+        try:
+            result, error = await _attempt_stream_download(
+                url, session, timeout, chunk_size, allow_redirects, sock_read_timeout,
+            )
+            if error is None:
+                return result, None
+            last_error = error
+            if error.status_code not in RETRYABLE_STATUSES:
+                return None, last_error
+        except (TimeoutError, aiohttp.ServerTimeoutError, aiohttp.ClientError) as e:
+            last_error = _classify_connection_error(e, sock_read_timeout)
+
+        if attempt < max_attempts - 1:
+            await _backoff_sleep(attempt)
+
+    return None, last_error
+
+
+@dataclass
+class DownloadToFileResult:
+    """
+    Result from download_to_file operation.
+
+    Attributes:
+        bytes_written: Number of bytes written to file
+        content_type: MIME type from Content-Type header
+    """
+
+    bytes_written: int
+    content_type: str | None
+
+
+async def download_to_file(
+    url: str,
+    output_path: Path,
+    session: aiohttp.ClientSession,
+    timeout: int | None = None,
+    chunk_size: int = CHUNK_SIZE,
+    sock_read_timeout: int = 30,
+) -> tuple[DownloadToFileResult | None, StreamDownloadError | None]:
+    """
+    Download URL content directly to file using streaming.
+
+    Convenience function that combines streaming download with file writing.
+    Useful for simple file download scenarios without custom processing.
+
+    Args:
+        url: URL to download
+        output_path: Path where file will be saved
+        session: aiohttp ClientSession (caller manages lifecycle)
+        timeout: Timeout in seconds (default: 120 for large files)
+        chunk_size: Size of chunks in bytes (default: 8MB)
+        sock_read_timeout: Timeout for individual socket read operations in seconds
+            (default: 30). Prevents hanging on stalled connections.
+
+    Returns:
+        Tuple of (DownloadToFileResult, None) on success
+        or (None, StreamDownloadError) on failure
+
+    Example:
+        async with aiohttp.ClientSession() as session:
+            result, error = await download_to_file(
+                "https://example.com/file.pdf",
+                Path("output.pdf"),
+                session
+            )
+            if error:
+                print(f"Download failed: {error.error_message}")
+            else:
+                print(f"Downloaded {result.bytes_written} bytes, type: {result.content_type}")
+    """
+    response, error = await stream_download_url(
+        url=url,
+        session=session,
+        timeout=timeout,
+        chunk_size=chunk_size,
+        sock_read_timeout=sock_read_timeout,
+    )
+
+    if error:
+        return None, error
+
+    # Get reference to chunk iterator for proper cleanup
+    chunk_iterator = response.chunk_iterator
+
+    try:
+        bytes_written = 0
+        # Ensure parent directory exists right before opening file
+        # This handles potential timing issues on Windows where mkdir may not
+        # be immediately visible to subsequent file operations
+        await asyncio.to_thread(Path(output_path).parent.mkdir, parents=True, exist_ok=True)
+        with open(output_path, "wb") as f:
+            async for chunk in chunk_iterator:
+                # Use asyncio.to_thread for disk I/O to avoid blocking event loop
+                await asyncio.to_thread(f.write, chunk)
+                bytes_written += len(chunk)
+
+        return (
+            DownloadToFileResult(
+                bytes_written=bytes_written,
+                content_type=response.content_type,
+            ),
+            None,
+        )
+
+    except OSError as e:
+        return None, StreamDownloadError(
+            status_code=None,
+            error_message=f"File write error: {str(e)}",
+            error_category=classify_os_error(e),
+        )
+    finally:
+        # Ensure async generator is closed to release the HTTP connection
+        # This prevents "Unclosed connection" warnings when iteration is
+        # interrupted by errors or early exit
+        await chunk_iterator.aclose()
+
+
+def should_stream(content_length: int | None) -> bool:
+    """
+    Determine if content should be streamed based on size.
+
+    Uses STREAM_THRESHOLD (50MB) as the decision boundary.
+    If content_length is unknown (None), defaults to streaming for safety.
+
+    Args:
+        content_length: Size in bytes from Content-Length header
+
+    Returns:
+        True if content should be streamed, False for in-memory download
+
+    Example:
+        if should_stream(content_length):
+            # Use streaming download
+            response, error = await stream_download_url(...)
+        else:
+            # Use in-memory download
+            response, error = await download_url(...)
+    """
+    if content_length is None:
+        # Unknown size - stream to be safe
+        return True
+
+    return content_length > STREAM_THRESHOLD
+
+
+__all__ = [
+    "CHUNK_SIZE",
+    "STREAM_THRESHOLD",
+    "StreamDownloadResponse",
+    "StreamDownloadError",
+    "DownloadToFileResult",
+    "stream_download_url",
+    "download_to_file",
+    "should_stream",
+]

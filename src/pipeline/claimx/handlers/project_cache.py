@@ -1,0 +1,63 @@
+"""
+Project cache for in-flight verification.
+
+Maintains a simple set of project IDs that have been processed
+to avoid redundant API calls.
+"""
+
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+class ProjectCache:
+    """
+    Simple in-memory set of project IDs that have been processed.
+
+    Used by handlers to avoid redundant API calls when verifying
+    that project data exists before writing child entities.
+
+    Delta merge handles duplicate project rows gracefully, so this
+    cache only optimizes for the common case (same project, multiple events
+    in a single worker session).
+    """
+
+    def __init__(self):
+        self._projects: set[str] = set()
+        logger.debug("ProjectCache initialized")
+
+    def has(self, project_id: str) -> bool:
+        return project_id in self._projects
+
+    def add(self, project_id: str) -> None:
+        self._projects.add(project_id)
+
+    def load_from_ids(self, project_ids: list[str]) -> int:
+        """
+        Preload cache with existing project IDs.
+
+        Args:
+            project_ids: List of project IDs to preload
+
+        Returns:
+            Number of unique IDs loaded
+        """
+        before_size = len(self._projects)
+        self._projects.update(str(pid) for pid in project_ids)
+        loaded_count = len(self._projects) - before_size
+
+        logger.info(
+            "Preloaded project cache",
+            extra={
+                "loaded_count": loaded_count,
+                "total_provided": len(project_ids),
+                "cache_size": len(self._projects),
+            },
+        )
+        return loaded_count
+
+    def size(self) -> int:
+        return len(self._projects)
+
+    def clear(self) -> None:
+        self._projects.clear()

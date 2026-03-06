@@ -1,0 +1,109 @@
+"""
+Thread-safe token cache with expiration tracking.
+
+This module provides in-memory caching of authentication tokens with automatic
+expiration handling. Tokens are cached per resource URL with configurable
+expiration buffers to prevent using tokens close to expiry.
+
+Local Development Support:
+    For local development, tokens can be managed via external token refresher
+    scripts that write to a JSON file. Services read fresh tokens from the file
+    by calling auth methods that check the cache first, then fall back to
+    reading the token file.
+
+Thread Safety:
+    All cache operations are protected by a lock to ensure thread-safe access
+    in multi-threaded environments (e.g., async workers, concurrent requests).
+
+Example:
+    >>> cache = TokenCache()
+    >>> cache.set("https://storage.azure.com/", "eyJ0eXAi...")
+    >>> token = cache.get("https://storage.azure.com/")
+    >>> if token:
+    ...     # Use cached token
+    >>> else:
+    ...     # Token expired or not cached, fetch new one
+"""
+
+import threading
+from datetime import UTC, datetime, timedelta
+
+# Token timing constants
+TOKEN_REFRESH_MINS = 50  # Refresh before expiry (Azure tokens: 60 min lifetime)
+TOKEN_EXPIRY_MINS = 60  # Azure token lifetime
+
+
+class TokenCache:
+    """
+    Thread-safe cache for authentication tokens.
+
+    Maintains an in-memory cache of tokens keyed by resource URL. Each token
+    tracks its acquisition time and is automatically considered invalid after
+    a configurable buffer period.
+
+    Thread Safety:
+        All operations (get/set/clear) are protected by a threading.Lock to
+        ensure safe concurrent access from multiple threads.
+
+    Local Development:
+        This cache is intended to work alongside file-based token management:
+        1. token_refresher.py daemon writes fresh tokens to tokens.json
+        2. Auth layer checks cache first (fast path)
+        3. On cache miss, auth layer reads from tokens.json
+        4. Fresh token is cached for subsequent requests
+        5. Services re-read tokens.json after 50 min when cache expires
+
+    Example:
+        >>> cache = TokenCache()
+        >>> # First request caches token
+        >>> cache.set("https://storage.azure.com/", "eyJ0eXAi...")
+        >>>
+        >>> # Subsequent requests use cache (if < 50 min old)
+        >>> cached_token = cache.get("https://storage.azure.com/")
+        >>>
+        >>> # After 50 min, cache returns None
+        >>> # Auth layer re-reads tokens.json and caches fresh token
+    """
+
+    def __init__(self):
+        self._tokens: dict[str, tuple[str, datetime]] = {}
+        self._lock = threading.Lock()
+
+    def _is_valid(self, acquired_at: datetime, buffer_mins: int = TOKEN_REFRESH_MINS) -> bool:
+        age = datetime.now(UTC) - acquired_at
+        return age < timedelta(minutes=buffer_mins)
+
+    def get(self, resource: str) -> str | None:
+        """Get cached token if still valid."""
+        with self._lock:
+            cached = self._tokens.get(resource)
+            if cached:
+                token, acquired_at = cached
+                if self._is_valid(acquired_at):
+                    return token
+            return None
+
+    def set(self, resource: str, token: str) -> None:
+        """Cache a token with current timestamp."""
+        with self._lock:
+            self._tokens[resource] = (token, datetime.now(UTC))
+
+    def clear(self, resource: str | None = None) -> None:
+        """Clear cached tokens. If resource is None, clears all."""
+        with self._lock:
+            if resource:
+                self._tokens.pop(resource, None)
+            else:
+                self._tokens.clear()
+
+    def get_age(self, resource: str) -> timedelta | None:
+        """Get age of cached token for diagnostics."""
+        with self._lock:
+            cached = self._tokens.get(resource)
+            if cached:
+                _, acquired_at = cached
+                return datetime.now(UTC) - acquired_at
+            return None
+
+
+__all__ = ["TokenCache", "TOKEN_REFRESH_MINS", "TOKEN_EXPIRY_MINS"]

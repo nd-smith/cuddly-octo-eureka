@@ -1,0 +1,471 @@
+<?xml version='1.0' encoding='UTF-8' ?>
+<GENERIC_ROUGHDRAFT xmlns="http://xactware.com/generic_roughdraft.xsd" majorVersion="28" minorVersion="300" transactionId="055379P">
+    <HEADER compName="National_Catastrophe_Team" dateCreated="2026-03-03T22:30:40">
+        <COMP_INFO><![CDATA[P.O. Box 672041\0D\0ADallas, Texas 75267\0D\0APhone: (800) 547-8676\0D\0AFax:  (877) 292-9527]]></COMP_INFO>
+    </HEADER>
+    <COVERSHEET>
+        <ESTIMATE_INFO estimateName="DONALD_DUSHANE" insuredName="DONALD DUSHANE" priceList="MIDE8X_FEB26" laborEff="Restoration/Service/Remodel" claimNumber="0689186120" policyNumber="000960215475" typeOfLoss="Windstorm and Hail" scopeType="Virtual Collaboration:　GHRN Ladder Assist" causeOfLoss="Wind Other" roofDamage="0" deprMat="1" inspNotPerformed="1" recipientsXNAddress="ALLSTATE_XF" rotationTrade="STRUCTURAL" carrierId="3372605" backInProgress="1" estimateType="Structural"/>
+        <ADDRESSES>
+            <ADDRESS type="Property" street="1692 LITTLESTONE RD" city="GROSSE POINTE" state="MI" zip="48236-1955" primary="1"/>
+            <ADDRESS type="Home" street="1692 LITTLESTONE RD" city="GROSSE POINTE WOODS" state="MI" zip="48236-1955"/>
+        </ADDRESSES>
+        <PHONES>
+            <PHONE type="Home" primary="1" phone="313-717-4519"/>
+        </PHONES>
+        <CONTACTS>
+            <CONTACT type="ClaimRep" name="Terrence Johnson">
+                <ADDRESSES>
+                    <ADDRESS type="Business" street="PO Box 660636" city="Dallas" state="TX" zip="75266" primary="1"/>
+                </ADDRESSES>
+                <PHONES>
+                    <PHONE primary="1" type="Business" phone="945-344-2460"/>
+                </PHONES>
+            </CONTACT>
+            <CONTACT type="Estimator" name="Terrence Johnson">
+                <ADDRESSES>
+                    <ADDRESS type="Business" street="PO Box 660636" city="Dallas" state="TX" zip="75266" primary="1"/>
+                </ADDRESSES>
+                <PHONES>
+                    <PHONE primary="1" type="Business" phone="945-344-2460"/>
+                </PHONES>
+            </CONTACT>
+        </CONTACTS>
+        <DATES loss="2022-08-29T04:00:00Z" completed="2026-03-03T17:30:37Z" received="2022-10-19T17:14:16Z" entered="2022-10-30T17:26:39Z" contacted="2022-11-02T18:18:00Z"/>
+        <OPENING_STATEMENT><![CDATA[Allstate is dedicated to providing you with outstanding service throughout the claim-handling process.  If you have any questions regarding this estimate, or if there are differences with the estimate provided by your repair person of choice, or if additional damage is found during the repair process, please contact us at (945) 344-2460.\0AThank you,\0ATerrence Johnson\0A\0A]]></OPENING_STATEMENT>
+    </COVERSHEET>
+    <COVERAGES>
+        <COVERAGE deductible="1500" coverageName="AA-Dwelling" coverageType="0" id="1">
+            <SUMMARY>
+                <TOTALS lineItemTotal="1642.33" subtotal="1652.85" rcv="1652.85" recDepr="71.45" depr="71.45" acv="1581.4" deductible="1500" fullDeduct="1500" netClaim="81.4" actualRecDepr="71.45" netClaimIfRec="152.85">
+                    <SALES_TAXES>
+                        <SALES_TAX desc="Material Sales Tax" amount="10.52" taxOP="OPonTax"/>
+                    </SALES_TAXES>
+                    <PAYMENT_TRACKER ptEstRemaining="71.45" ptEstValue="1652.85" ptRecoverableDep="71.45" ptNumItemActs="13" ptItemsWithRemaining="6" ptTotalPaid="81.4"/>
+                    <SUBLIMIT_RECAP>
+                        <SUBLIMIT_INFO desc="TS-TREES, PLANTS, AND SHRUBS" singleItemLimit="500" aggLimit="13204"/>
+                        <SUBLIMIT_INFO desc="WB-WATER BACKUP" aggLimit="5000"/>
+                    </SUBLIMIT_RECAP>
+                    <SIGNATURE estimator="Terrence Johnson"/>
+                </TOTALS>
+            </SUMMARY>
+            <LOSS_DATA rcl="1652.85" bd="71.45" deductApplied="1500" acvLoss="1581.4" acvClaim="81.4" rcvClaim="152.85" potentialSuppClaim="71.45" adjLossAmt="152.85"/>
+        </COVERAGE>
+        <COVERAGE coverageName="A9-Dwelling - Mold" coverageType="0" id="2"/>
+        <COVERAGE coverageName="AE-Extended Protection Amendatory Endorsement" coverageType="0" id="3"/>
+        <COVERAGE coverageName="BB-Other Structures" coverageType="0" id="4">
+            <SUMMARY>
+                <TOTALS lineItemTotal="5609.72" subtotal="5667.66" rcv="5667.66" recDepr="677.69" depr="677.69" acv="4989.97" netClaim="4989.97" actualRecDepr="677.69" netClaimIfRec="5667.66">
+                    <SALES_TAXES>
+                        <SALES_TAX desc="Material Sales Tax" amount="57.94" taxOP="OPonTax"/>
+                    </SALES_TAXES>
+                    <PAYMENT_TRACKER ptEstRemaining="677.69" ptEstValue="5667.66" ptRecoverableDep="677.69" ptNumItemActs="17" ptItemsWithRemaining="3" ptTotalPaid="4989.97"/>
+                    <SUBLIMIT_RECAP>
+                        <SUBLIMIT_INFO desc="Tree Debris Removal - BB" singleItemLimit="500" aggLimit="500" acv="487.28" rc="487.28"/>
+                    </SUBLIMIT_RECAP>
+                    <SIGNATURE estimator="Terrence Johnson"/>
+                </TOTALS>
+            </SUMMARY>
+            <LOSS_DATA rcl="5667.66" bd="677.69" acvLoss="4989.97" acvClaim="4989.97" rcvClaim="5667.66" potentialSuppClaim="677.69" adjLossAmt="5667.66"/>
+        </COVERAGE>
+        <COVERAGE coverageName="B9-Other Structures - Mold" coverageType="0" id="5"/>
+        <COVERAGE coverageName="CC-Unscheduled Personal Property" coverageType="2" id="6"/>
+        <COVERAGE coverageName="C9-Unscheduled Personal Property - Mold" coverageType="2" id="7"/>
+        <COVERAGE coverageName="CD-Credit Card and Depositors Fraud" coverageType="2" id="9"/>
+        <COVERAGE coverageName="DD-Additional Living Expense" coverageType="0" id="16"/>
+        <COVERAGE coverageName="D9-Additional Living Expense - Mold" coverageType="0" id="17"/>
+        <COVERAGE coverageName="FF-Fire Department Service Charge" coverageType="0" id="18"/>
+        <COVERAGE coverageName="LD-Land" coverageType="0" id="19"/>
+        <COVERAGE coverageName="ML-Motorized Land Vehicle" coverageType="0" id="22"/>
+        <COVERAGE coverageName="MN-Manuscripts" coverageType="0" id="23"/>
+        <COVERAGE coverageName="PF-Power Failure" coverageType="0" id="24"/>
+        <COVERAGE coverageName="RC-Replacement Cost - Contents" coverageType="0" id="25"/>
+        <COVERAGE coverageName="RD-Replacement Cost - Dwelling" coverageType="0" id="26"/>
+        <COVERAGE coverageName="VP-Motorized Land Vehicle Parts, Equipment or Accessories" coverageType="0" id="33"/>
+        <COVERAGE coverageName="XX-Liability" coverageType="0" id="36"/>
+        <COVERAGE coverageName="X9-Liability - Mold" coverageType="0" id="37"/>
+        <COVERAGE coverageName="YY-Guest Medical" coverageType="0" id="38"/>
+        <COVERAGE coverageName="Y9-Guest Medical - Mold" coverageType="0" id="39"/>
+    </COVERAGES>
+    <RECAP_TAX_OP>
+        <TAXES>
+            <TAX_DETAIL taxNum="1" rate="6" desc="Material Sales Tax" amount="68.46"/>
+            <TAX_DETAIL taxNum="2" rate="6" desc="Storage Tax"/>
+        </TAXES>
+        <LINE_ITEMS>
+            <TAXES>
+                <TAX_AMOUNT taxNum="1" amount="68.46"/>
+            </TAXES>
+        </LINE_ITEMS>
+    </RECAP_TAX_OP>
+    <LINE_ITEM_DETAIL homeownerTotal="2893.87" contractorTotal="5820.51" total="7252.05">
+        <GROUP desc="DONALD_DUSHANE" total="7252.05" acvTotal="6571.37" rcvTotal="7320.51" tax="68.46">
+            <GROUPS>
+                <GROUP desc="Source - EagleView Roof" total="3606.58" acvTotal="2986.83" rcvTotal="3664.52" tax="57.94">
+                    <GROUPS>
+                        <GROUP desc="Source - EagleView Roof" total="3606.58" acvTotal="2986.83" rcvTotal="3664.52" tax="57.94">
+                            <GROUPS>
+                                <GROUP desc="Detached Shed" total="3335.1" acvTotal="2709.59" rcvTotal="3387.28" tax="52.18">
+                                    <ROOM_DIM_VARS sfSkRoof="413.3" skRoofSquares="4.13"/>
+                                    <SUBROOMS>
+                                        <SUBROOM subroomNum="1" desc="R13">
+                                            <ROOM_DIM_VARS sfSkRoof="164.35" skRoofSquares="1.64"/>
+                                        </SUBROOM>
+                                    </SUBROOMS>
+                                    <ITEMS total="3335.1">
+                                        <ITEM type="I" lineNum="1" cat="SFG" sel="FACW4-" act="&amp;" actPrefix="R&amp;R" desc="Fascia - 1&quot; x 4&quot; - #2 pine" calc="22" qty="22" unit="LF" coverageName="BB-Other Structures" remove="0.46" replace="7.7" total="179.52" acv="179.52" deprType="2" recoverable="1" lifeExp="75" tax="1.17" acvTotal="180.69" rcvTotal="180.69" isPartOfInitSettle="1" laborTotal="159.72" laborBase="40.26" laborBurden="19.14" laborMarkup="100.32" laborHours="1.3" material="19.58" marketCond="0.22" containsBSCDontApply="1">
+                                            <ITEM_ACTS>
+                                                <ITEM_ACT act="-" labUnit="0.45" mktUnit="0.01" acvTotal="0.46" rcvTotal="0.46" trade="DMO"/>
+                                                <ITEM_ACT act="+" labUnit="6.81" matUnit="0.89" tax="0.05" acvTotal="7.75" rcvTotal="7.75" trade="SDG"/>
+                                            </ITEM_ACTS>
+                                        </ITEM>
+                                        <ITEM type="I" lineNum="2" cat="FRM" sel="SHW1/2" act="&amp;" actPrefix="R&amp;R" desc="Sheathing - OSB - 1/2&quot;" calc="25" qty="25" unit="SF" coverageName="BB-Other Structures" remove="0.76" replace="1.57" total="58.25" acv="56.75" deprType="2" recoverable="1" age="20" lifeExp="150" depr="1.5" tax="0.68" acvTotal="57.43" deprTotal="1.5" rcvTotal="58.93" isPartOfInitSettle="1" laborTotal="47" laborBase="18" laborBurden="8.75" laborMarkup="20.25" laborHours="0.63" material="11.25" containsBSCDontApply="1">
+                                            <ITEM_ACTS>
+                                                <ITEM_ACT act="-" labUnit="0.76" acvTotal="0.76" rcvTotal="0.76" trade="DMO"/>
+                                                <ITEM_ACT act="+" labUnit="1.12" matUnit="0.45" tax="0.03" acvTotal="1.54" deprTotal="0.06" rcvTotal="1.6" trade="CARP-FRM"/>
+                                            </ITEM_ACTS>
+                                        </ITEM>
+                                        <ITEM type="N">
+                                            <NOTE><![CDATA[Allowing for the repair of the branch impacted decking\0A]]></NOTE>
+                                        </ITEM>
+                                        <ITEM type="I" lineNum="3" cat="RFG" sel="240" act="-" actPrefix="Remove" desc="3 tab - 25 yr. - composition shingle roofing - incl. felt" calc="SQ" qty="5.78" unit="SQ" coverageName="BB-Other Structures" remove="73.36" total="424.02" acv="424.02" deprType="2" recoverable="1" age="20" lifeExp="25" acvTotal="424.02" rcvTotal="424.02" isPartOfInitSettle="1" laborTotal="368.36" laborBase="154.1" laborBurden="76.18" laborMarkup="138.08" laborHours="6.05" equipment="55.66" containsBSCDontApply="1">
+                                            <ITEM_ACTS>
+                                                <ITEM_ACT act="-" labUnit="63.73" equUnit="9.63" trade="DMO"/>
+                                            </ITEM_ACTS>
+                                        </ITEM>
+                                        <ITEM type="I" lineNum="4" cat="RFG" sel="240" act="+" desc="3 tab - 25 yr. - composition shingle roofing - incl. felt" calc="SQ" qty="6" unit="SQ" coverageName="BB-Other Structures" replace="345.05" total="2070.3" acv="1440.25" deprType="2" recoverable="1" age="20" lifeExp="25" depr="630.05" tax="47.25" acvTotal="1487.5" deprTotal="630.05" rcvTotal="2117.55" isPartOfInitSettle="1" laborTotal="1282.74" laborBase="214.14" laborBurden="108.84" laborMarkup="959.76" laborHours="6.78" material="787.56" containsBSCDontApply="1">
+                                            <ITEM_ACTS>
+                                                <ITEM_ACT act="+" labUnit="213.79" matUnit="131.26" trade="RFG"/>
+                                            </ITEM_ACTS>
+                                        </ITEM>
+                                        <ITEM type="N">
+                                            <NOTE><![CDATA[The roof waste % is not available. The roof is missing variables that will result in an inaccurate waste %. ]]></NOTE>
+                                        </ITEM>
+                                        <ITEM type="N">
+                                            <NOTE><![CDATA[This line item includes an allowance of $106.00 per square, which reflects current market values in your area. Market prices were verified by Material Supply Warehouse (MSW). While you or your contractor are under no obligation to use this supplier, MSW allows you or your contractor of choice to have materials delivered to your home for installation. For more information on MSW, please visit www.materialsupplywarehouse.com, or contact them at info@materialsupplywarehouse.com, or 888-508-5009.\C2\A0\C2\A0\0A]]></NOTE>
+                                        </ITEM>
+                                        <ITEM type="I" lineNum="5" cat="RFG" sel="FELT15" act="+" desc="Roofing felt - 15 lb." calc="SQ" qty="5.78" unit="SQ" coverageName="BB-Other Structures" replace="47.04" total="271.89" acv="225.75" deprType="2" recoverable="1" age="20" lifeExp="20" depr="46.14" tax="3.08" acvTotal="228.83" deprTotal="46.14" rcvTotal="274.97" isPartOfInitSettle="1" laborTotal="220.62" laborBase="36.82" laborBurden="18.73" laborMarkup="165.07" laborHours="1.17" material="51.27" containsBSCDontApply="1">
+                                            <ITEM_ACTS>
+                                                <ITEM_ACT act="+" labUnit="38.17" matUnit="8.87" trade="RFG"/>
+                                            </ITEM_ACTS>
+                                        </ITEM>
+                                        <ITEM type="I" lineNum="6" cat="RFG" sel="STEEP" act="-" actPrefix="Remove" desc="Additional charge for steep roof - 7/12 to 9/12 slope" calc="4.14" qty="4.14" unit="SQ" coverageName="BB-Other Structures" remove="17.47" total="72.33" acv="72.33" deprType="2" recoverable="1" age="20" acvTotal="72.33" rcvTotal="72.33" isPartOfInitSettle="1" laborTotal="72.33" laborBase="30.26" laborBurden="14.95" laborMarkup="27.12" laborHours="1.19" containsBSCDontApply="1">
+                                            <ITEM_ACTS>
+                                                <ITEM_ACT act="-" labUnit="17.47" trade="DMO"/>
+                                            </ITEM_ACTS>
+                                        </ITEM>
+                                        <ITEM type="I" lineNum="7" cat="RFG" sel="STEEP" act="+" desc="Additional charge for steep roof - 7/12 to 9/12 slope" calc="4.14" qty="4.14" unit="SQ" coverageName="BB-Other Structures" replace="62.51" total="258.79" acv="258.79" deprType="2" recoverable="1" age="20" acvTotal="258.79" rcvTotal="258.79" isPartOfInitSettle="1" laborTotal="258.79" laborBase="43.22" laborBurden="21.94" laborMarkup="193.63" laborHours="1.37" containsBSCDontApply="1">
+                                            <ITEM_ACTS>
+                                                <ITEM_ACT act="+" labUnit="62.51" trade="RFG"/>
+                                            </ITEM_ACTS>
+                                        </ITEM>
+                                    </ITEMS>
+                                </GROUP>
+                                <GROUP desc="Elevation" total="271.48" acvTotal="277.24" rcvTotal="277.24" tax="5.76">
+                                    <GROUPS>
+                                        <GROUP desc="Back Elevation" total="271.48" acvTotal="277.24" rcvTotal="277.24" tax="5.76">
+                                            <ITEMS total="271.48">
+                                                <ITEM type="I" lineNum="8" cat="SFG" sel="GUTA" act="&amp;" actPrefix="R&amp;R" desc="Downspout - aluminum - up to 5&quot;" descChanged="1" calc="22" qty="22" unit="LF" coverageName="BB-Other Structures" remove="0.67" replace="9.6" total="225.94" acv="225.94" deprType="2" recoverable="1" lifeExp="25" tax="5.48" acvTotal="231.42" rcvTotal="231.42" isPartOfInitSettle="1" laborTotal="134.64" laborBase="34.98" laborBurden="16.72" laborMarkup="82.94" laborHours="1.16" material="91.3" containsBSCDontApply="1">
+                                                    <ITEM_ACTS>
+                                                        <ITEM_ACT act="-" labUnit="0.67" acvTotal="0.67" rcvTotal="0.67" trade="DMO"/>
+                                                        <ITEM_ACT act="+" labUnit="5.45" matUnit="4.15" tax="0.25" acvTotal="9.85" rcvTotal="9.85" trade="SDG"/>
+                                                    </ITEM_ACTS>
+                                                </ITEM>
+                                                <ITEM type="I" lineNum="9" cat="PNT" sel="FACW" act="+" desc="Prime &amp; paint exterior fascia - wood, 4&quot;- 6&quot; wide" calc="22" qty="22" unit="LF" coverageName="BB-Other Structures" replace="2.07" total="45.54" acv="45.54" deprType="2" recoverable="1" lifeExp="15" tax="0.28" acvTotal="45.82" rcvTotal="45.82" isPartOfInitSettle="1" laborTotal="40.92" laborBase="14.52" laborBurden="6.82" laborMarkup="19.58" laborHours="0.49" material="4.62" containsBSCDontApply="1">
+                                                    <ITEM_ACTS>
+                                                        <ITEM_ACT act="+" labUnit="1.86" matUnit="0.21" trade="PNT"/>
+                                                    </ITEM_ACTS>
+                                                </ITEM>
+                                            </ITEMS>
+                                        </GROUP>
+                                    </GROUPS>
+                                </GROUP>
+                            </GROUPS>
+                        </GROUP>
+                    </GROUPS>
+                </GROUP>
+                <GROUP desc="SKETCH3" total="1073.61" acvTotal="1012.68" rcvTotal="1084.13" tax="10.52">
+                    <GROUPS>
+                        <GROUP desc="Main Level" total="1073.61" acvTotal="1012.68" rcvTotal="1084.13" tax="10.52">
+                            <GROUPS>
+                                <GROUP desc="Living Room" total="1073.61" acvTotal="1012.68" rcvTotal="1084.13" tax="10.52">
+                                    <ROOM_INFO sketchCeiling="8&apos;"/>
+                                    <ROOM_DIM_VARS sfWalls="358.67" sfCeiling="125" sfWallsCeiling="483.67" sfFloor="125" syFloor="13.89" lfFloorPerim="44.83" lfCeilingPerim="44.83"/>
+                                    <ITEMS total="1073.61">
+                                        <ITEM type="I" lineNum="10" cat="CON" sel="ROOM" act="+" desc="Contents - move out then reset" calc="1" qty="1" unit="EA" coverageName="AA-Dwelling" replace="83.88" total="83.88" acv="83.88" deprType="2" recoverable="1" age="10" acvTotal="83.88" rcvTotal="83.88" isPartOfInitSettle="1" laborTotal="83.88" laborBase="37.42" laborBurden="18.5" laborMarkup="27.96" laborHours="1.47" containsBSCDontApply="1">
+                                            <ITEM_ACTS>
+                                                <ITEM_ACT act="+" labUnit="83.88" trade="LBR"/>
+                                            </ITEM_ACTS>
+                                        </ITEM>
+                                        <ITEM type="I" lineNum="11" cat="DRY" sel="MASKSF&gt;" act="+" desc="Floor protection - plastic and tape - 10 mil" calc="30" qty="30" unit="SF" coverageName="AA-Dwelling" replace="0.39" total="11.7" acv="11.46" deprType="2" recoverable="1" age="10" lifeExp="150" depr="0.24" tax="0.22" acvTotal="11.68" deprTotal="0.24" rcvTotal="11.92" isPartOfInitSettle="1" laborTotal="6.9" laborBase="2.1" laborBurden="0.9" laborMarkup="3.9" laborHours="0.06" material="3.6" marketCond="1.2" containsBSCDontApply="1">
+                                            <ITEM_ACTS>
+                                                <ITEM_ACT act="+" labUnit="0.23" matUnit="0.12" mktUnit="0.04" trade="DRY"/>
+                                            </ITEM_ACTS>
+                                        </ITEM>
+                                        <ITEM type="I" lineNum="12" cat="INS" sel="BT10" act="&amp;" actPrefix="R&amp;R" desc="Batt insulation - 10&quot; - R30 - unfaced batt" calc="35" qty="35" unit="SF" coverageName="AA-Dwelling" remove="0.48" replace="2.02" total="87.5" acv="84.58" deprType="2" recoverable="1" age="10" lifeExp="150" depr="2.92" tax="2.63" acvTotal="87.21" deprTotal="2.92" rcvTotal="90.13" isPartOfInitSettle="1" laborTotal="43.75" laborBase="14" laborBurden="7" laborMarkup="22.75" laborHours="0.53" material="43.75" containsBSCDontApply="1">
+                                            <ITEM_ACTS>
+                                                <ITEM_ACT act="-" labUnit="0.48" acvTotal="0.48" rcvTotal="0.48" trade="DMO"/>
+                                                <ITEM_ACT act="+" labUnit="0.77" matUnit="1.25" tax="0.08" acvTotal="2.02" deprTotal="0.08" rcvTotal="2.1" trade="INS"/>
+                                            </ITEM_ACTS>
+                                        </ITEM>
+                                        <ITEM type="I" lineNum="13" cat="DRY" sel="5/8++" act="&amp;" actPrefix="R&amp;R" desc="5/8&quot; drywall - hung, taped, with smooth wall finish" calc="24+10" qty="34" unit="SF" coverageName="AA-Dwelling" remove="0.56" replace="4.27" total="164.22" acv="162.43" deprType="2" recoverable="1" age="10" lifeExp="150" depr="1.79" tax="1.61" acvTotal="164.04" deprTotal="1.79" rcvTotal="165.83" isPartOfInitSettle="1" laborTotal="137.36" laborBase="41.48" laborBurden="19.72" laborMarkup="76.16" laborHours="1.41" material="26.86" containsBSCDontApply="1">
+                                            <ITEM_ACTS>
+                                                <ITEM_ACT act="-" labUnit="0.56" acvTotal="0.56" rcvTotal="0.56" trade="DMO"/>
+                                                <ITEM_ACT act="+" labUnit="3.48" matUnit="0.79" tax="0.05" acvTotal="4.27" deprTotal="0.05" rcvTotal="4.32" trade="DRY"/>
+                                            </ITEM_ACTS>
+                                        </ITEM>
+                                        <ITEM type="N">
+                                            <NOTE><![CDATA[Allowing for the drywall installation of the ceiling. Allowing for the replacement of the drywall to the affected wall. \0A]]></NOTE>
+                                        </ITEM>
+                                        <ITEM type="I" lineNum="14" cat="PNT" sel="SP" act="+" desc="Seal/prime then paint the surface area (2 coats)" descChanged="1" calc="45" qty="45" unit="SF" coverageName="AA-Dwelling" replace="1.18" total="53.1" acv="45.9" deprType="2" recoverable="1" age="10" lifeExp="15" depr="7.2" tax="0.65" acvTotal="46.55" deprTotal="7.2" rcvTotal="53.75" isPartOfInitSettle="1" laborTotal="41.85" laborBase="14.85" laborBurden="6.75" laborMarkup="20.25" laborHours="0.51" material="10.8" marketCond="0.45" containsBSCDontApply="1">
+                                            <ITEM_ACTS>
+                                                <ITEM_ACT act="+" labUnit="0.93" matUnit="0.24" mktUnit="0.01" trade="PNT"/>
+                                            </ITEM_ACTS>
+                                        </ITEM>
+                                        <ITEM type="I" lineNum="15" cat="PNT" sel="P" act="+" desc="Paint the walls and ceiling - one coat" calc="WC" qty="483.67" unit="SF" coverageName="AA-Dwelling" replace="0.82" total="396.61" acv="341.79" deprType="2" recoverable="1" age="10" lifeExp="15" depr="54.82" tax="4.93" acvTotal="346.72" deprTotal="54.82" rcvTotal="401.54" isPartOfInitSettle="1" laborTotal="314.39" laborBase="111.25" laborBurden="53.2" laborMarkup="149.94" laborHours="3.76" material="82.22" containsBSCDontApply="1">
+                                            <ITEM_ACTS>
+                                                <ITEM_ACT act="+" labUnit="0.65" matUnit="0.17" trade="PNT"/>
+                                            </ITEM_ACTS>
+                                        </ITEM>
+                                        <ITEM type="I" lineNum="16" cat="FNC" sel="CWNRS" act="+" desc="Crown molding - Detach &amp; reset" calc="PC" qty="44.83" unit="LF" coverageName="AA-Dwelling" replace="4.94" total="221.46" acv="221.46" deprType="2" recoverable="1" age="10" tax="0.08" acvTotal="221.54" rcvTotal="221.54" isPartOfInitSettle="1" laborTotal="220.12" laborBase="76.21" laborBurden="34.97" laborMarkup="108.94" laborHours="2.23" material="1.34" containsBSCDontApply="1">
+                                            <ITEM_ACTS>
+                                                <ITEM_ACT act="+" labUnit="4.91" matUnit="0.03" trade="CARP-FNC"/>
+                                            </ITEM_ACTS>
+                                        </ITEM>
+                                        <ITEM type="I" lineNum="17" cat="PNT" sel="CWN" act="+" desc="Paint crown molding - one coat" calc="PC" qty="44.83" unit="LF" coverageName="AA-Dwelling" replace="1.23" total="55.14" acv="50.66" deprType="2" recoverable="1" age="10" lifeExp="15" depr="4.48" tax="0.4" acvTotal="51.06" deprTotal="4.48" rcvTotal="55.54" isPartOfInitSettle="1" laborTotal="48.42" laborBase="17.04" laborBurden="8.07" laborMarkup="23.31" laborHours="0.58" material="6.72" containsBSCDontApply="1">
+                                            <ITEM_ACTS>
+                                                <ITEM_ACT act="+" labUnit="1.08" matUnit="0.15" trade="PNT"/>
+                                            </ITEM_ACTS>
+                                        </ITEM>
+                                    </ITEMS>
+                                </GROUP>
+                            </GROUPS>
+                        </GROUP>
+                    </GROUPS>
+                </GROUP>
+                <GROUP desc="Debris Removal" total="46.78" acvTotal="46.78" rcvTotal="46.78">
+                    <ITEMS total="46.78">
+                        <ITEM type="I" lineNum="18" cat="DMO" sel="PU" act="-" actPrefix="Remove" desc="Haul debris - per pickup truck load - including dump fees" calc=".25" qty="0.25" unit="EA" coverageName="BB-Other Structures" remove="187.12" total="46.78" acv="46.78" deprType="2" recoverable="1" acvTotal="46.78" rcvTotal="46.78" isPartOfInitSettle="1" laborTotal="30.37" laborBase="12.71" laborBurden="6.28" laborMarkup="11.38" laborHours="0.5" equipment="16.41" containsBSCDontApply="1">
+                            <ITEM_ACTS>
+                                <ITEM_ACT act="-" labUnit="121.47" equUnit="65.65" trade="DMO"/>
+                            </ITEM_ACTS>
+                        </ITEM>
+                    </ITEMS>
+                </GROUP>
+                <GROUP desc="Tree Removal" total="1522.75" acvTotal="1522.75" rcvTotal="1522.75">
+                    <ITEMS total="1522.75">
+                        <ITEM type="I" lineNum="19" cat="DMO" sel="TREELHR" act="-" actPrefix="Remove" desc="Tree - removal - per hour (Labor only)" calc="2*8.5" qty="17" unit="HR" coverageName="BB-Other Structures" remove="60.91" total="1035.47" acv="1035.47" deprType="2" recoverable="1" acvTotal="1035.47" rcvTotal="1035.47" isPartOfInitSettle="1" laborTotal="1035.47" laborBase="433.16" laborBurden="214.2" laborMarkup="388.11" laborHours="17" containsBSCDontApply="1">
+                            <ITEM_ACTS>
+                                <ITEM_ACT act="-" labUnit="60.91" trade="DMO"/>
+                            </ITEM_ACTS>
+                        </ITEM>
+                        <ITEM type="I" lineNum="20" cat="DMO" sel="TREELHR" act="-" actPrefix="Remove" desc="Tree - debris removal - per hour (Labor only)" descChanged="1" calc="2*4" qty="8" unit="HR" coverageName="BB-Other Structures" sublimitName="Tree Debris Removal - BB" remove="60.91" total="487.28" acv="487.28" deprType="2" recoverable="1" acvTotal="487.28" rcvTotal="487.28" isPartOfInitSettle="1" laborTotal="487.28" laborBase="203.84" laborBurden="100.8" laborMarkup="182.64" laborHours="8" containsBSCDontApply="1">
+                            <ITEM_ACTS>
+                                <ITEM_ACT act="-" labUnit="60.91" trade="DMO"/>
+                            </ITEM_ACTS>
+                        </ITEM>
+                    </ITEMS>
+                </GROUP>
+                <GROUP desc="Labor Minimums Applied" total="1002.33" acvTotal="1002.33" rcvTotal="1002.33">
+                    <ITEMS total="1002.33">
+                        <ITEM type="I" lineNum="21" cat="DRY" sel="MN-A" act="+" desc="Drywall labor minimum" calc="1" qty="1" unit="EA" coverageName="AA-Dwelling" replace="340.55" total="340.55" acv="340.55" recoverable="1" acvTotal="340.55" rcvTotal="340.55" isPartOfInitSettle="0" laborTotal="340.55" laborBase="340.55">
+                            <ITEM_ACTS>
+                                <ITEM_ACT act="+" labUnit="340.55"/>
+                            </ITEM_ACTS>
+                        </ITEM>
+                        <ITEM type="I" lineNum="22" cat="LAB" sel="LBRMN-A" act="+" desc="General labor - labor minimum" calc="1" qty="1" unit="EA" coverageName="AA-Dwelling" replace="1.89" total="1.89" acv="1.89" recoverable="1" acvTotal="1.89" rcvTotal="1.89" isPartOfInitSettle="0" laborTotal="1.89" laborBase="1.89">
+                            <ITEM_ACTS>
+                                <ITEM_ACT act="+" labUnit="1.89"/>
+                            </ITEM_ACTS>
+                        </ITEM>
+                        <ITEM type="I" lineNum="23" cat="FRM" sel="MN-A" act="+" desc="Framing labor minimum" calc="1" qty="1" unit="EA" coverageName="BB-Other Structures" replace="174.51" total="174.51" acv="174.51" recoverable="1" acvTotal="174.51" rcvTotal="174.51" isPartOfInitSettle="0" laborTotal="174.51" laborBase="174.51">
+                            <ITEM_ACTS>
+                                <ITEM_ACT act="+" labUnit="174.51"/>
+                            </ITEM_ACTS>
+                        </ITEM>
+                        <ITEM type="I" lineNum="24" cat="INS" sel="MN-A" act="+" desc="Insulation labor minimum" calc="1" qty="1" unit="EA" coverageName="AA-Dwelling" replace="226.28" total="226.28" acv="226.28" recoverable="1" acvTotal="226.28" rcvTotal="226.28" isPartOfInitSettle="0" laborTotal="226.28" laborBase="226.28">
+                            <ITEM_ACTS>
+                                <ITEM_ACT act="+" labUnit="226.28"/>
+                            </ITEM_ACTS>
+                        </ITEM>
+                        <ITEM type="I" lineNum="25" cat="SFG" sel="GUTMN-A" act="+" desc="Gutter labor minimum" calc="1" qty="1" unit="EA" coverageName="BB-Other Structures" replace="259.1" total="259.1" acv="259.1" recoverable="1" acvTotal="259.1" rcvTotal="259.1" isPartOfInitSettle="0" laborTotal="259.1" laborBase="259.1">
+                            <ITEM_ACTS>
+                                <ITEM_ACT act="+" labUnit="259.1"/>
+                            </ITEM_ACTS>
+                        </ITEM>
+                    </ITEMS>
+                </GROUP>
+            </GROUPS>
+            <AREA_DIM_VARS sfWalls="358.67" sfCeiling="125" sfWallsCeiling="483.67" sfFloor="125" syFloor="13.89" lfFloorPerim="44.83" lfCeilingPerim="44.83" sfSkFloor="125" sfSkTotalFloor="140.39" sfSkIntWall="358.67" sfSkExtWall="611.83" lfSkExtWallPerim="47.5" sfSkRoof="577.65" skRoofSquares="5.78"/>
+        </GROUP>
+        <COV_BREAKDOWN total="7252.05" grandTotal="6571.37">
+            <COV_AMOUNTS desc="AA-Dwelling" total="1642.33" totalPct="22.65" grandTotal="1581.4" grandTotalPct="24.06"/>
+            <COV_AMOUNTS desc="A9-Dwelling - Mold"/>
+            <COV_AMOUNTS desc="AE-Extended Protection Amendatory Endorsement"/>
+            <COV_AMOUNTS desc="BB-Other Structures" total="5609.72" totalPct="77.35" grandTotal="4989.97" grandTotalPct="75.94"/>
+            <COV_AMOUNTS desc="B9-Other Structures - Mold"/>
+            <COV_AMOUNTS desc="CC-Unscheduled Personal Property"/>
+            <COV_AMOUNTS desc="C9-Unscheduled Personal Property - Mold"/>
+            <COV_AMOUNTS desc="CD-Credit Card and Depositors Fraud"/>
+            <COV_AMOUNTS desc="DD-Additional Living Expense"/>
+            <COV_AMOUNTS desc="D9-Additional Living Expense - Mold"/>
+            <COV_AMOUNTS desc="FF-Fire Department Service Charge"/>
+            <COV_AMOUNTS desc="LD-Land"/>
+            <COV_AMOUNTS desc="ML-Motorized Land Vehicle"/>
+            <COV_AMOUNTS desc="MN-Manuscripts"/>
+            <COV_AMOUNTS desc="PF-Power Failure"/>
+            <COV_AMOUNTS desc="RC-Replacement Cost - Contents"/>
+            <COV_AMOUNTS desc="RD-Replacement Cost - Dwelling"/>
+            <COV_AMOUNTS desc="VP-Motorized Land Vehicle Parts, Equipment or Accessories"/>
+            <COV_AMOUNTS desc="XX-Liability"/>
+            <COV_AMOUNTS desc="X9-Liability - Mold"/>
+            <COV_AMOUNTS desc="YY-Guest Medical"/>
+            <COV_AMOUNTS desc="Y9-Guest Medical - Mold"/>
+        </COV_BREAKDOWN>
+    </LINE_ITEM_DETAIL>
+    <RECAP_BY_ROOM total="7252.05">
+        <RECAP_GROUP desc="DONALD_DUSHANE" subtotal="7252.05" subtotalPercentage="100">
+            <RECAP_GROUPS>
+                <RECAP_GROUP desc="Source - EagleView Roof" subtotal="3606.58" subtotalPercentage="49.73">
+                    <SUBTOTAL_COV_INFO>
+                        <COV name="BB-Other Structures" rate="100" amount="3606.58"/>
+                    </SUBTOTAL_COV_INFO>
+                    <RECAP_GROUPS>
+                        <RECAP_GROUP desc="Source - EagleView Roof" subtotal="3606.58" subtotalPercentage="49.73">
+                            <SUBTOTAL_COV_INFO>
+                                <COV name="BB-Other Structures" rate="100" amount="3606.58"/>
+                            </SUBTOTAL_COV_INFO>
+                            <RECAP_GROUPS>
+                                <RECAP_GROUP desc="Detached Shed" items="3335.1" itemsPercentage="45.99">
+                                    <ITEMS_COV_INFO>
+                                        <COV name="BB-Other Structures" rate="100" amount="3335.1"/>
+                                    </ITEMS_COV_INFO>
+                                </RECAP_GROUP>
+                                <RECAP_GROUP desc="Elevation" subtotal="271.48" subtotalPercentage="3.74">
+                                    <SUBTOTAL_COV_INFO>
+                                        <COV name="BB-Other Structures" rate="100" amount="271.48"/>
+                                    </SUBTOTAL_COV_INFO>
+                                    <RECAP_GROUPS>
+                                        <RECAP_GROUP desc="Back Elevation" items="271.48" itemsPercentage="3.74">
+                                            <ITEMS_COV_INFO>
+                                                <COV name="BB-Other Structures" rate="100" amount="271.48"/>
+                                            </ITEMS_COV_INFO>
+                                        </RECAP_GROUP>
+                                    </RECAP_GROUPS>
+                                </RECAP_GROUP>
+                            </RECAP_GROUPS>
+                        </RECAP_GROUP>
+                    </RECAP_GROUPS>
+                </RECAP_GROUP>
+                <RECAP_GROUP desc="SKETCH3" subtotal="1073.61" subtotalPercentage="14.8">
+                    <SUBTOTAL_COV_INFO>
+                        <COV name="AA-Dwelling" rate="100" amount="1073.61"/>
+                    </SUBTOTAL_COV_INFO>
+                    <RECAP_GROUPS>
+                        <RECAP_GROUP desc="Main Level" subtotal="1073.61" subtotalPercentage="14.8">
+                            <SUBTOTAL_COV_INFO>
+                                <COV name="AA-Dwelling" rate="100" amount="1073.61"/>
+                            </SUBTOTAL_COV_INFO>
+                            <RECAP_GROUPS>
+                                <RECAP_GROUP desc="Living Room" items="1073.61" itemsPercentage="14.8">
+                                    <ITEMS_COV_INFO>
+                                        <COV name="AA-Dwelling" rate="100" amount="1073.61"/>
+                                    </ITEMS_COV_INFO>
+                                </RECAP_GROUP>
+                            </RECAP_GROUPS>
+                        </RECAP_GROUP>
+                    </RECAP_GROUPS>
+                </RECAP_GROUP>
+                <RECAP_GROUP desc="Debris Removal" items="46.78" itemsPercentage="0.65">
+                    <ITEMS_COV_INFO>
+                        <COV name="BB-Other Structures" rate="100" amount="46.78"/>
+                    </ITEMS_COV_INFO>
+                </RECAP_GROUP>
+                <RECAP_GROUP desc="Tree Removal" items="1522.75" itemsPercentage="21">
+                    <ITEMS_COV_INFO>
+                        <COV name="BB-Other Structures" rate="100" amount="1522.75"/>
+                    </ITEMS_COV_INFO>
+                </RECAP_GROUP>
+                <RECAP_GROUP desc="Labor Minimums Applied" items="1002.33" itemsPercentage="13.82">
+                    <ITEMS_COV_INFO>
+                        <COV name="AA-Dwelling" rate="56.74" amount="568.72"/>
+                        <COV name="BB-Other Structures" rate="43.26" amount="433.61"/>
+                    </ITEMS_COV_INFO>
+                </RECAP_GROUP>
+            </RECAP_GROUPS>
+            <SUBTOTAL_COV_INFO>
+                <COV name="AA-Dwelling" rate="22.65" amount="1642.33"/>
+                <COV name="BB-Other Structures" rate="77.35" amount="5609.72"/>
+            </SUBTOTAL_COV_INFO>
+        </RECAP_GROUP>
+    </RECAP_BY_ROOM>
+    <RECAP_BY_CATEGORY subtotalRCV="7320.51" subtotalDeprec="749.14" subtotalACV="6571.37">
+        <OP_ITEMS subtotalRCV="7252.05" subtotalDeprec="749.14" subtotalACV="6502.91">
+            <CATEGORY desc="GENERAL DEMOLITION" rcv="2145.58" acv="2145.58">
+                <COV_INFO>
+                    <COV name="AA-Dwelling" rate="1.67" amount="35.84"/>
+                    <COV name="BB-Other Structures" rate="98.33" amount="2109.74"/>
+                </COV_INFO>
+            </CATEGORY>
+            <CATEGORY desc="CONTENT MANIPULATION" rcv="83.88" acv="83.88">
+                <COV_INFO>
+                    <COV name="AA-Dwelling" rate="100" amount="83.88"/>
+                </COV_INFO>
+            </CATEGORY>
+            <CATEGORY desc="DRYWALL" rcv="497.43" deprec="2.03" acv="495.4">
+                <COV_INFO>
+                    <COV name="AA-Dwelling" rate="100" amount="497.43"/>
+                </COV_INFO>
+            </CATEGORY>
+            <CATEGORY desc="FINISH CARPENTRY / TRIMWORK" rcv="221.46" acv="221.46">
+                <COV_INFO>
+                    <COV name="AA-Dwelling" rate="100" amount="221.46"/>
+                </COV_INFO>
+            </CATEGORY>
+            <CATEGORY desc="FRAMING &amp; ROUGH CARPENTRY" rcv="213.76" deprec="1.5" acv="212.26">
+                <COV_INFO>
+                    <COV name="BB-Other Structures" rate="100" amount="213.76"/>
+                </COV_INFO>
+            </CATEGORY>
+            <CATEGORY desc="INSULATION" rcv="296.98" deprec="2.92" acv="294.06">
+                <COV_INFO>
+                    <COV name="AA-Dwelling" rate="100" amount="296.98"/>
+                </COV_INFO>
+            </CATEGORY>
+            <CATEGORY desc="LABOR ONLY" rcv="1.89" acv="1.89">
+                <COV_INFO>
+                    <COV name="AA-Dwelling" rate="100" amount="1.89"/>
+                </COV_INFO>
+            </CATEGORY>
+            <CATEGORY desc="PAINTING" rcv="550.39" deprec="66.5" acv="483.89">
+                <COV_INFO>
+                    <COV name="AA-Dwelling" rate="91.73" amount="504.85"/>
+                    <COV name="BB-Other Structures" rate="8.27" amount="45.54"/>
+                </COV_INFO>
+            </CATEGORY>
+            <CATEGORY desc="ROOFING" rcv="2600.98" deprec="676.19" acv="1924.79">
+                <COV_INFO>
+                    <COV name="BB-Other Structures" rate="100" amount="2600.98"/>
+                </COV_INFO>
+            </CATEGORY>
+            <CATEGORY desc="SOFFIT, FASCIA, &amp; GUTTER" rcv="639.7" acv="639.7">
+                <COV_INFO>
+                    <COV name="BB-Other Structures" rate="100" amount="639.7"/>
+                </COV_INFO>
+            </CATEGORY>
+        </OP_ITEMS>
+        <SALES_TAXES>
+            <SALES_TAX desc="Material Sales Tax" rcv="68.46" acv="68.46">
+                <COV_INFO>
+                    <COV name="AA-Dwelling" rate="15.37" amount="10.52"/>
+                    <COV name="BB-Other Structures" rate="84.63" amount="57.94"/>
+                </COV_INFO>
+            </SALES_TAX>
+        </SALES_TAXES>
+    </RECAP_BY_CATEGORY>
+    <PT_TOTALS ptNumPmts="1">
+        <PT_PAYMENTS>
+            <PT_PAYMENT date="2026-03-03" userID="TJOLD" acvAmount="5071.37" type="1"/>
+        </PT_PAYMENTS>
+    </PT_TOTALS>
+    <CLOSING_STATEMENT><![CDATA[{\5Crtf This document includes a damage estimate for your property based on Replacement Cost Value (RCV) and Actual Cash Value (ACV). The ACV estimate reflects the RCV less the amount of any depreciation.  Depreciation is the decrease in value of an item due to the item\5Cu8217?s condition, which takes into consideration age, life expectancy, usage, type of item, and market factors.  As your adjuster has explained, depending on your policy, you may be able to recover your depreciation upon your repair or replacement of the covered damages. \5Cpar \5Cpar During the claim process, we asked for your assistance in establishing the age and condition of your damaged items. If you have any questions regarding the age and condition applied to your property, or any other questions regarding this estimate, please contact your adjuster.\5Cpar \5Cpar Specialized skill, licensing or certification may be needed of any contractor(s) that you retain, for instance, to identify the presence and nature of any potential contaminants, toxins, pollutants, or other hazards that may be encountered during the course of the work, or to utilize appropriate work practices and procedures during the course of the work. Check with your local or State public health or environmental agency regarding potential hazards, including contractor qualifications and other requirements. For your safety, it is prudent to avoid areas where damaged structures, materials or unknown substances may be present, and to not disturb such structures, material, or unknown substances until your contractors have inspected the work site.\5Cpar \5Cpar The suggestions above are provided only for your consideration. They in no way supplement, alter or modify your existing coverage.  Your insurance policy is the legal contract that contains the terms and limitations of your coverage.\5Cpar \5Cpar If you have any concerns about the grade of flooring on your estimate, you may take advantage of a free service that will provide you with a more specific analysis. To use this option, please keep a 12" x 12" sample of your damaged flooring, and notify your Allstate adjuster that you would like the additional analysis.\5Cpar }]]></CLOSING_STATEMENT>
+</GENERIC_ROUGHDRAFT>

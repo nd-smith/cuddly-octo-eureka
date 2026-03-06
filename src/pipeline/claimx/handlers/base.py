@@ -1,0 +1,433 @@
+"""Base handler classes and registry for ClaimX event processing."""
+
+import logging
+from abc import ABC, abstractmethod
+from collections import defaultdict
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Optional,
+)
+
+from core.types import ErrorCategory
+from pipeline.claimx.api_client import ClaimXApiClient
+from pipeline.claimx.schemas.entities import EntityRowsMessage
+from pipeline.claimx.schemas.events import ClaimXEventMessage
+from pipeline.common.logging import extract_log_context
+from pipeline.common.metrics import (
+    claimx_handler_duration_seconds,
+    claimx_handler_events_total,
+)
+
+if TYPE_CHECKING:
+    from pipeline.claimx.handlers.project_cache import ProjectCache
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class EnrichmentResult:
+    """Result from processing a single ClaimX event."""
+
+    event: ClaimXEventMessage
+    success: bool
+    rows: EntityRowsMessage | None = field(default_factory=EntityRowsMessage)
+    error: str | None = None
+    error_category: ErrorCategory | None = None
+    is_retryable: bool = True
+    api_calls: int = 0
+    duration_ms: int = 0
+
+    def __post_init__(self):
+        if self.rows is None:
+            self.rows = EntityRowsMessage()
+
+
+@dataclass
+class HandlerResult:
+    """Aggregated result from processing a batch of events."""
+
+    handler_name: str
+    total: int
+    succeeded: int
+    failed: int
+    failed_permanent: int
+    skipped: int
+    rows: EntityRowsMessage
+    errors: list[str]
+    duration_seconds: float
+    api_calls: int
+
+
+def _tally_enrichment_result(
+    result: EnrichmentResult,
+    all_rows: EntityRowsMessage,
+    errors: list[str],
+) -> tuple[int, int, int]:
+    """Tally a single enrichment result. Returns (succeeded, failed, failed_permanent)."""
+    if result.success:
+        all_rows.merge(result.rows)
+        return 1, 0, 0
+
+    permanent = 0 if result.is_retryable else 1
+    if result.error:
+        errors.append(result.error)
+    return 0, 1, permanent
+
+
+def aggregate_results(
+    handler_name: str,
+    results: list[EnrichmentResult],
+    start_time: datetime,
+) -> HandlerResult:
+    """Aggregate individual enrichment results into a single handler result."""
+    duration_seconds = (datetime.now(UTC) - start_time).total_seconds()
+
+    total = 0
+    succeeded = 0
+    failed = 0
+    failed_permanent = 0
+    api_calls = 0
+    all_rows = EntityRowsMessage()
+    errors: list[str] = []
+
+    for enrichment_result in results:
+        if enrichment_result is None:
+            logger.error(
+                "Invalid handler result",
+                extra={"handler_name": handler_name},
+                exc_info=True,
+            )
+            continue
+        total += 1
+        api_calls += enrichment_result.api_calls
+        s, f, fp = _tally_enrichment_result(enrichment_result, all_rows, errors)
+        succeeded += s
+        failed += f
+        failed_permanent += fp
+
+    # Log entity row counts
+    row_counts = {
+        "projects": len(all_rows.projects),
+        "contacts": len(all_rows.contacts),
+        "media": len(all_rows.media),
+        "tasks": len(all_rows.tasks),
+        "task_templates": len(all_rows.task_templates),
+        "external_links": len(all_rows.external_links),
+        "video_collab": len(all_rows.video_collab),
+    }
+    non_zero_counts = {k: v for k, v in row_counts.items() if v > 0}
+
+    if non_zero_counts:
+        logger.debug(
+            "Aggregated entity rows",
+            extra={
+                "handler_name": handler_name,
+                "entity_counts": non_zero_counts,
+                "total_rows": sum(non_zero_counts.values()),
+            },
+        )
+
+    if succeeded > 0:
+        avg_duration = duration_seconds / succeeded
+        claimx_handler_duration_seconds.labels(handler_name=handler_name, status="success").observe(
+            avg_duration
+        )
+
+    if failed > 0:
+        avg_duration = duration_seconds / failed
+        claimx_handler_duration_seconds.labels(handler_name=handler_name, status="failed").observe(
+            avg_duration
+        )
+
+    claimx_handler_events_total.labels(handler_name=handler_name, status="success").inc(succeeded)
+    claimx_handler_events_total.labels(handler_name=handler_name, status="failed").inc(failed)
+
+    return HandlerResult(
+        handler_name=handler_name,
+        total=total,
+        succeeded=succeeded,
+        failed=failed,
+        failed_permanent=failed_permanent,
+        skipped=0,
+        rows=all_rows,
+        errors=errors,
+        duration_seconds=duration_seconds,
+        api_calls=api_calls,
+    )
+
+
+class EventHandler(ABC):
+    """Base class for ClaimX event handlers.
+
+    Processes events by type and returns entity rows for Delta tables.
+    """
+
+    event_types: list[str] = []
+
+    def __init__(
+        self,
+        client: ClaimXApiClient,
+        project_cache: Optional["ProjectCache"] = None,
+        task_event_producer: Any | None = None,
+        video_event_producer: Any | None = None,
+    ):
+        self.client = client
+        self.project_cache = project_cache
+        self.task_event_producer = task_event_producer
+        self.video_event_producer = video_event_producer
+
+    @property
+    def name(self) -> str:
+        return self.__class__.__name__
+
+    async def ensure_project_exists(
+        self,
+        project_id: int,
+        trace_id: str,
+    ) -> "EntityRowsMessage":
+        """
+        Ensure project exists in warehouse by fetching project data.
+
+        This is used by handlers to perform in-flight project verification,
+        ensuring the project record exists before adding related entities.
+
+        Args:
+            project_id: Project ID to verify
+            trace_id: Trace ID for traceability
+
+        Returns:
+            EntityRowsMessage containing project and contact rows
+        """
+        from pipeline.claimx.handlers.project import ProjectHandler
+
+        project_handler = ProjectHandler(self.client, project_cache=self.project_cache)
+        return await project_handler.fetch_project_data(
+            project_id,
+            trace_id=trace_id,
+        )
+
+    @abstractmethod
+    async def handle_event(self, event: ClaimXEventMessage) -> EnrichmentResult:
+        pass
+
+    async def handle_batch(self, events: list[ClaimXEventMessage]) -> list[EnrichmentResult]:
+        """Default processes events independently. Override for optimized batch processing."""
+        import asyncio
+
+        if not events:
+            return []
+
+        logger.debug(
+            "Processing event batch",
+            extra={
+                "handler_name": self.name,
+                "batch_size": len(events),
+            },
+        )
+
+        start_time = datetime.now(UTC)
+        tasks = [self.handle_event(event) for event in events]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        final_results = []
+        success_count = 0
+        error_count = 0
+
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                event = events[i]
+                error_count += 1
+                logger.error(
+                    "Handler failed for event",
+                    extra={
+                        "handler_name": self.name,
+                        **extract_log_context(event),
+                    },
+                    exc_info=True,
+                )
+                # Create failure result
+                final_results.append(
+                    EnrichmentResult(
+                        event=event,
+                        success=False,
+                        error=str(result),
+                        error_category=ErrorCategory.TRANSIENT,
+                        is_retryable=True,
+                        api_calls=0,
+                        duration_ms=0,
+                    )
+                )
+            else:
+                final_results.append(result)
+                if result.success:
+                    success_count += 1
+                else:
+                    error_count += 1
+
+        elapsed_ms = (datetime.now(UTC) - start_time).total_seconds() * 1000
+        logger.debug(
+            "Batch complete",
+            extra={
+                "handler_name": self.name,
+                "batch_size": len(events),
+                "records_succeeded": success_count,
+                "records_failed": error_count,
+                "duration_ms": round(elapsed_ms, 2),
+            },
+        )
+
+        return final_results
+
+    async def process(self, events: list[ClaimXEventMessage]) -> HandlerResult:
+        if not events:
+            logger.debug(
+                "No events to process",
+                extra={
+                    "handler_name": self.name,
+                },
+            )
+            return HandlerResult(
+                handler_name=self.name,
+                total=0,
+                succeeded=0,
+                failed=0,
+                failed_permanent=0,
+                skipped=0,
+                rows=EntityRowsMessage(),
+                errors=[],
+                duration_seconds=0.0,
+                api_calls=0,
+            )
+
+        start_time = datetime.now(UTC)
+
+        # Log event type distribution
+        event_type_counts: dict[str, int] = {}
+        for event in events:
+            event_type_counts[event.event_type] = event_type_counts.get(event.event_type, 0) + 1
+
+        logger.debug(
+            "Processing events",
+            extra={
+                "handler_name": self.name,
+                "total_events": len(events),
+                "event_type_distribution": event_type_counts,
+            },
+        )
+
+        results = await self.handle_batch(events)
+
+        handler_result = aggregate_results(self.name, results, start_time)
+
+        logger.debug(
+            "Handler processing complete",
+            extra={
+                "handler_name": self.name,
+                "records_processed": handler_result.total,
+                "records_succeeded": handler_result.succeeded,
+                "records_failed": handler_result.failed,
+                "records_failed_permanent": handler_result.failed_permanent,
+                "api_calls": handler_result.api_calls,
+                "duration_seconds": round(handler_result.duration_seconds, 3),
+            },
+        )
+
+        return handler_result
+
+
+# Module-level handler registry
+_HANDLERS: dict[str, type[EventHandler]] = {}
+
+
+class HandlerRegistry:
+    """Registry mapping event types to handler classes."""
+
+    def get_handler_class(self, event_type: str) -> type[EventHandler] | None:
+        return _HANDLERS.get(event_type)
+
+    def get_handler(
+        self,
+        event_type: str,
+        client: ClaimXApiClient,
+    ) -> EventHandler | None:
+        handler_class = _HANDLERS.get(event_type)
+        if handler_class is None:
+            logger.debug(
+                "No handler found for event type",
+                extra={
+                    "event_type": event_type,
+                },
+            )
+            return None
+        return handler_class(client)
+
+    def group_events_by_handler(
+        self,
+        events: list[ClaimXEventMessage],
+    ) -> dict[type[EventHandler], list[ClaimXEventMessage]]:
+        groups: dict[type[EventHandler], list[ClaimXEventMessage]] = defaultdict(list)
+        unhandled_types: dict[str, int] = {}
+
+        for event in events:
+            handler_class = self.get_handler_class(event.event_type)
+            if handler_class:
+                groups[handler_class].append(event)
+            else:
+                unhandled_types[event.event_type] = unhandled_types.get(event.event_type, 0) + 1
+
+        handler_distribution = {cls.__name__: len(evts) for cls, evts in groups.items()}
+
+        logger.debug(
+            "Grouped events by handler",
+            extra={
+                "total_events": len(events),
+                "handler_count": len(groups),
+                "handler_distribution": handler_distribution,
+                "unhandled_event_types": unhandled_types if unhandled_types else None,
+            },
+        )
+
+        if unhandled_types:
+            for event_type, count in unhandled_types.items():
+                logger.warning(
+                    "No handler for event type",
+                    extra={
+                        "event_type": event_type,
+                        "event_count": count,
+                    },
+                )
+
+        return dict(groups)
+
+    def get_registered_handlers(self) -> dict[str, str]:
+        return {event_type: handler.__name__ for event_type, handler in _HANDLERS.items()}
+
+
+def get_handler_registry() -> HandlerRegistry:
+    return HandlerRegistry()
+
+
+def register_handler(cls: type[EventHandler]) -> type[EventHandler]:
+    """Decorator to register a handler class for its event_types."""
+    for event_type in cls.event_types:
+        if event_type in _HANDLERS:
+            logger.warning(
+                "Overwriting handler registration",
+                extra={
+                    "event_type": event_type,
+                    "old_handler": _HANDLERS[event_type].__name__,
+                    "new_handler": cls.__name__,
+                },
+            )
+        _HANDLERS[event_type] = cls
+        logger.debug(
+            "Registered handler",
+            extra={
+                "handler_name": cls.__name__,
+                "event_type": event_type,
+            },
+        )
+    return cls

@@ -1,0 +1,451 @@
+<?xml version="1.0" encoding="utf-8"?>
+<XACTDOC>
+  <XACTNET_INFO
+    assignmentType="0"
+    businessUnit="064"
+    carrierId="0000001"
+    createdByEdi="1"
+    emergency="0"
+    jobSizeCode="2"
+    profileCode="71"
+    recipientsXM8UserId=""
+    recipientsXNAddress="EXAMPLE.ONLINE"
+    rotationTrade="WIND/HAIL INSPECTION"
+    senderId="0000002"
+    sendersXNAddress="EXAMPLE.HOME.WEB"
+    transactionId="AAAAAAA"
+    originalTransactionId="AAAAAAA"
+    transactionType="EST,ASG">
+    <CONTROL_POINTS>
+      <CONTROL_POINT
+        stamp="2026-03-01"
+        type="Planned Inspection"
+        user="Test User"
+        userNumber="00000000000" />
+      <CONTROL_POINT
+        stamp="2026-02-28T13:39:48Z"
+        type="Note"
+        user="Test User"
+        userNumber="00000000000">
+        <NOTES>Assignment Creation</NOTES>
+      </CONTROL_POINT>
+    </CONTROL_POINTS>
+  </XACTNET_INFO>
+  <ADM
+    dateOfLoss="2026-02-24T22:30:00Z"
+    dateReceived="2026-02-26T17:53:06Z">
+    <COVERAGE_LOSS
+      claimNumber="0000000000"
+      dateInitCov="2014-03-27"
+      isCommercial="0"
+      policyEnd="2026-03-27"
+      policyNumber="000000000000"
+      policyStart="2025-03-27">
+      <COVERAGES>
+        <COVERAGE
+          applyTo="0"
+          coIns="0"
+          covName="AA-Dwelling"
+          covType="0"
+          deductible="0"
+          id="COV1"
+          policyLimit="208017"
+          reserveAmt="0"
+          sharedDeductibleRefID="0"
+          sharedLimitRefID="0">
+          <ADD_SUBLIMITS />
+        </COVERAGE>
+        <COVERAGE
+          applyTo="0"
+          coIns="0"
+          covName="A9-Dwelling - Mold"
+          covType="0"
+          deductible="0"
+          id="COV2"
+          policyLimit="0"
+          reserveAmt="0"
+          sharedDeductibleRefID="0"
+          sharedLimitRefID="0">
+          <ADD_SUBLIMITS />
+        </COVERAGE>
+        <COVERAGE
+          applyTo="0"
+          coIns="0"
+          covName="BB-Other Structures"
+          covType="0"
+          deductible="0"
+          id="COV3"
+          policyLimit="20802"
+          reserveAmt="0"
+          sharedDeductibleRefID="0"
+          sharedLimitRefID="0">
+          <ADD_SUBLIMITS />
+        </COVERAGE>
+        <COVERAGE
+          applyTo="0"
+          coIns="0"
+          covName="B9-Other Structures - Mold"
+          covType="0"
+          deductible="0"
+          id="COV4"
+          policyLimit="0"
+          reserveAmt="0"
+          sharedDeductibleRefID="0"
+          sharedLimitRefID="0">
+          <ADD_SUBLIMITS />
+        </COVERAGE>
+        <COVERAGE
+          applyTo="0"
+          coIns="0"
+          covName="CC-Unscheduled Personal Property"
+          covType="2"
+          deductible="0"
+          id="COV5"
+          policyLimit="156013"
+          reserveAmt="0"
+          sharedDeductibleRefID="0"
+          sharedLimitRefID="0">
+          <ADD_SUBLIMITS>
+            <ADD_SUBLIMIT
+              aggregate="1000"
+              feature="CJ-JEWELRY, WATCHES, AND FURS"
+              sublimitid="4" />
+            <ADD_SUBLIMIT
+              aggregate="500"
+              feature="LR-LOCK REPLACEMENT"
+              sublimitid="9" />
+            <ADD_SUBLIMIT
+              aggregate="1000"
+              feature="WT-WATERCRAFT"
+              sublimitid="14" />
+            <ADD_SUBLIMIT
+              aggregate="500"
+              feature="CK-COMPACT DISCS"
+              sublimitid="6" />
+            <ADD_SUBLIMIT
+              aggregate="1000"
+              feature="TD-TRADING CARDS(2)"
+              sublimitid="11" />
+            <ADD_SUBLIMIT
+              aggregate="250"
+              feature="TD-TRADING CARDS"
+              sublimitid="10" />
+            <ADD_SUBLIMIT
+              aggregate="200"
+              feature="CB-BUSINESS PROPERTY OFF / ON PREMISE"
+              sublimitid="1" />
+            <ADD_SUBLIMIT
+              aggregate="5000"
+              feature="CJ-JEWELRY, WATCHES, AND FURS(2)"
+              sublimitid="5" />
+            <ADD_SUBLIMIT
+              aggregate="2000"
+              feature="CG-GUNS"
+              sublimitid="3" />
+            <ADD_SUBLIMIT
+              aggregate="500"
+              feature="CR-CONTENTS OF REFRIGERATOR"
+              sublimitid="8" />
+            <ADD_SUBLIMIT
+              aggregate="1000"
+              feature="TR-TRAILER - NON BOAT"
+              sublimitid="13" />
+            <ADD_SUBLIMIT
+              aggregate="1000"
+              feature="CB-BUSINESS PROPERTY OFF / ON PREMISE(2)"
+              sublimitid="2" />
+            <ADD_SUBLIMIT
+              aggregate="2500"
+              feature="CS-SILVERWARE/GOLDWARE/PEWTERWARE"
+              sublimitid="7" />
+            <ADD_SUBLIMIT
+              aggregate="10000"
+              feature="TL-THEFT OF TOOLS"
+              sublimitid="12" />
+          </ADD_SUBLIMITS>
+        </COVERAGE>
+        <COVERAGE
+          applyTo="0"
+          coIns="0"
+          covName="C9-Unscheduled Personal Property - Mold"
+          covType="2"
+          deductible="0"
+          id="COV6"
+          policyLimit="0"
+          reserveAmt="0"
+          sharedDeductibleRefID="0"
+          sharedLimitRefID="0">
+          <ADD_SUBLIMITS />
+        </COVERAGE>
+        <COVERAGE
+          applyTo="0"
+          coIns="0"
+          covName="DB-Debris Removal"
+          covType="0"
+          deductible="0"
+          id="COV15"
+          policyLimit="0"
+          reserveAmt="0"
+          sharedDeductibleRefID="0"
+          sharedLimitRefID="0">
+          <ADD_SUBLIMITS />
+        </COVERAGE>
+        <COVERAGE
+          applyTo="0"
+          coIns="0"
+          covName="DD-Additional Living Expense"
+          covType="0"
+          deductible="0"
+          id="COV16"
+          policyLimit="83207"
+          reserveAmt="0"
+          sharedDeductibleRefID="0"
+          sharedLimitRefID="0">
+          <ADD_SUBLIMITS />
+        </COVERAGE>
+        <COVERAGE
+          applyTo="0"
+          coIns="0"
+          covName="D9-Additional Living Expense - Mold"
+          covType="0"
+          deductible="0"
+          id="COV17"
+          policyLimit="0"
+          reserveAmt="0"
+          sharedDeductibleRefID="0"
+          sharedLimitRefID="0">
+          <ADD_SUBLIMITS />
+        </COVERAGE>
+        <COVERAGE
+          applyTo="0"
+          coIns="0"
+          covName="FF-Fire Department Charges"
+          covType="0"
+          deductible="0"
+          id="COV18"
+          policyLimit="500"
+          reserveAmt="0"
+          sharedDeductibleRefID="0"
+          sharedLimitRefID="0">
+          <ADD_SUBLIMITS />
+        </COVERAGE>
+        <COVERAGE
+          applyTo="0"
+          coIns="0"
+          covName="LD-Land"
+          covType="0"
+          deductible="0"
+          id="COV19"
+          policyLimit="10000"
+          reserveAmt="0"
+          sharedDeductibleRefID="0"
+          sharedLimitRefID="0">
+          <ADD_SUBLIMITS />
+        </COVERAGE>
+        <COVERAGE
+          applyTo="0"
+          coIns="0"
+          covName="ML-Motorized Land Vehicle"
+          covType="0"
+          deductible="0"
+          id="COV21"
+          policyLimit="10000"
+          reserveAmt="0"
+          sharedDeductibleRefID="0"
+          sharedLimitRefID="0">
+          <ADD_SUBLIMITS />
+        </COVERAGE>
+        <COVERAGE
+          applyTo="0"
+          coIns="0"
+          covName="RC-Replacement Cost - Contents"
+          covType="0"
+          deductible="0"
+          id="COV22"
+          policyLimit="0"
+          reserveAmt="0"
+          sharedDeductibleRefID="0"
+          sharedLimitRefID="0">
+          <ADD_SUBLIMITS />
+        </COVERAGE>
+        <COVERAGE
+          applyTo="0"
+          coIns="0"
+          covName="TS-Tree, Shrubs, Plants and Lawns"
+          covType="0"
+          deductible="0"
+          id="COV27"
+          policyLimit="500"
+          reserveAmt="0"
+          sharedDeductibleRefID="0"
+          sharedLimitRefID="0">
+          <ADD_SUBLIMITS />
+        </COVERAGE>
+        <COVERAGE
+          applyTo="0"
+          coIns="0"
+          covName="TS-Tree, Shrubs, Plants and Lawns"
+          covType="0"
+          deductible="0"
+          id="COV28"
+          policyLimit="10401"
+          reserveAmt="0"
+          sharedDeductibleRefID="0"
+          sharedLimitRefID="0">
+          <ADD_SUBLIMITS />
+        </COVERAGE>
+        <COVERAGE
+          applyTo="0"
+          coIns="0"
+          covName="VP-Motorized Land Vehicle Parts, Equipment or Accessories"
+          covType="0"
+          deductible="0"
+          id="COV29"
+          policyLimit="1500"
+          reserveAmt="0"
+          sharedDeductibleRefID="0"
+          sharedLimitRefID="0">
+          <ADD_SUBLIMITS />
+        </COVERAGE>
+        <COVERAGE
+          applyTo="0"
+          coIns="0"
+          covName="XX-Liability"
+          covType="0"
+          deductible="0"
+          id="COV31"
+          policyLimit="100000"
+          reserveAmt="0"
+          sharedDeductibleRefID="0"
+          sharedLimitRefID="0">
+          <ADD_SUBLIMITS />
+        </COVERAGE>
+        <COVERAGE
+          applyTo="0"
+          coIns="0"
+          covName="YY-Guest Medical"
+          covType="0"
+          deductible="0"
+          id="COV32"
+          policyLimit="1000"
+          reserveAmt="0"
+          sharedDeductibleRefID="0"
+          sharedLimitRefID="0">
+          <ADD_SUBLIMITS />
+        </COVERAGE>
+      </COVERAGES>
+      <DEDUCT_CHOICES />
+      <FORMS>
+        <FORM
+          editionDate=""
+          name="AP4813-00" />
+        <FORM
+          editionDate=""
+          name="AP4922-00" />
+        <FORM
+          editionDate=""
+          name="AVP244-01" />
+        <FORM
+          editionDate=""
+          name="AVP245-01" />
+        <FORM
+          editionDate=""
+          name="AVP247-00" />
+        <FORM
+          editionDate=""
+          name="AVP81-00" />
+        <FORM
+          editionDate=""
+          name="AVP82-00" />
+      </FORMS>
+      <TOL
+        code="75"
+        desc="WINDSTORM AND HAIL" />
+    </COVERAGE_LOSS>
+  </ADM>
+  <CLAIM_INFO>
+    <ADMIN_INFO>
+      <INSURANCE_CLIENT>
+        <CONTACTMETHODS />
+      </INSURANCE_CLIENT>
+    </ADMIN_INFO>
+    <ASSIGNMENT_REFERRAL>
+      <BILLING_ARRANGEMENT />
+      <RETURN_PRODUCT_PREFERENCE />
+    </ASSIGNMENT_REFERRAL>
+    <LOSS_INFO />
+  </CLAIM_INFO>
+  <CONTACTS>
+    <CONTACT
+      name="TEST INSURED"
+      type="Client">
+      <ADDRESSES>
+        <ADDRESS
+          city="SAMPLE CITY"
+          country="US"
+          postal="000000000"
+          state="TX"
+          street="123 EXAMPLE ST"
+          type="Home" />
+        <ADDRESS
+          city="SAMPLE CITY"
+          country="US"
+          postal="00000-0000"
+          state="TX"
+          street="123 EXAMPLE ST"
+          type="Property" />
+      </ADDRESSES>
+      <CONTACTMETHODS>
+        <EMAIL
+          address="TESTINSURED@EXAMPLE.COM" />
+        <PHONE
+          number="000-000-0000"
+          type="Home" />
+      </CONTACTMETHODS>
+    </CONTACT>
+  </CONTACTS>
+  <PARAMS
+    priceList="MSTU8X_MAR26" />
+  <PROJECT_INFO>
+    <NOTES>RoofTypeCd: 2
+Loss Description: 
+Location Description: 
+Policy Line Code: 070
+Policy Type Description: A9
+Lienholder Name: 
+Companion Claims - 
+Prior Loss Claim Number:000812178556 Prior Loss Date:11/21/2025
+Prior Loss Claim Number:000738972900 Prior Loss Date:12/10/2023
+Prior Loss Claim Number:000736793431 Prior Loss Date:11/02/2023
+Coverage Amount
+AA-Dwelling $208017/ $0
+A9-Dwelling - Mold $0/ $0
+BB-Other Structures $20802/ $0
+B9-Other Structures - Mold $0/ $0
+CC-Unscheduled Personal Property $156013/ $0
+C9-Unscheduled Personal Property - Mold $0/ $0
+CB-Business Property Off / On Premise $200/ $1000
+CG-Guns $2000/ $0
+CJ-Jewelry, Watches, and Furs $1000/ $5000
+CK-Compact Discs $500/ $0
+CS-Silverware/Goldware/Pewterware $2500/ $0
+CR-Contents of Refrigerator $500/ $0
+DB-Debris Removal $0/ $0
+DD-Additional Living Expense $83207/ $0
+D9-Additional Living Expense - Mold $0/ $0
+FF-Fire Department Charges $500/ $0
+LD-Land $10000/ $0
+LR-Lock Replacement $500/ $0
+ML-Motorized Land Vehicle $10000/ $0
+RC-Replacement Cost - Contents $0/ $0
+TD-Trading Cards $250/ $1000
+TL-Theft of Tools $10000/ $0
+TR-Trailer - Non Boat $1000/ $0
+TS-Tree, Shrubs, Plants and Lawns $500/ $10401
+VP-Motorized Land Vehicle Parts, Equipment or Accessories $1500/ $0
+WT-Watercraft $1000/ $0
+XX-Liability $100000/ $0
+YY-Guest Medical $1000/ $0
+</NOTES>
+  </PROJECT_INFO>
+</XACTDOC>

@@ -1,0 +1,449 @@
+"""Delta Lake writer for ClaimX entity tables.
+
+Writes entity data to 7 Delta tables using merge operations for idempotency.
+"""
+
+import logging
+from datetime import UTC, date, datetime
+from typing import Any
+
+import polars as pl
+
+from pipeline.claimx.schemas.entities import EntityRowsMessage
+from pipeline.common.writers.base import BaseDeltaWriter
+
+# Schema definitions matching actual Delta table schemas
+#   IntegerType -> pl.Int32
+#   LongType -> pl.Int64
+#   DoubleType -> pl.Float64
+#   TimestampType -> pl.Datetime("us", "UTC")
+#   DateType -> pl.Date
+
+CONTACTS_SCHEMA = {
+    "project_id": pl.Utf8,
+    "contact_email": pl.Utf8,
+    "contact_type": pl.Utf8,
+    "first_name": pl.Utf8,
+    "last_name": pl.Utf8,
+    "phone_number": pl.Utf8,
+    "is_primary_contact": pl.Boolean,
+    "master_file_name": pl.Utf8,
+    "task_assignment_id": pl.Int32,
+    "video_collaboration_id": pl.Utf8,
+    "trace_id": pl.Utf8,
+    "created_at": pl.Datetime("us", "UTC"),
+    "last_enriched_at": pl.Datetime("us", "UTC"),
+    "created_date": pl.Date,
+    "phone_country_code": pl.Int64,
+    "updated_at": pl.Utf8,
+}
+
+MEDIA_SCHEMA = {
+    "media_id": pl.Utf8,
+    "project_id": pl.Utf8,
+    "task_assignment_id": pl.Utf8,
+    "file_type": pl.Utf8,
+    "file_name": pl.Utf8,
+    "media_description": pl.Utf8,
+    "media_comment": pl.Utf8,
+    "latitude": pl.Utf8,
+    "longitude": pl.Utf8,
+    "gps_source": pl.Utf8,
+    "taken_date": pl.Utf8,
+    "full_download_link": pl.Utf8,
+    "expires_at": pl.Utf8,
+    "trace_id": pl.Utf8,
+    "created_at": pl.Utf8,
+    "updated_at": pl.Utf8,
+    "last_enriched_at": pl.Utf8,
+}
+
+PROJECTS_SCHEMA = {
+    "project_id": pl.Utf8,
+    "project_number": pl.Utf8,
+    "master_file_name": pl.Utf8,
+    "secondary_number": pl.Utf8,
+    "status": pl.Utf8,
+    "created_date": pl.Utf8,
+    "date_of_loss": pl.Utf8,
+    "type_of_loss": pl.Utf8,
+    "cause_of_loss": pl.Utf8,
+    "loss_description": pl.Utf8,
+    "customer_first_name": pl.Utf8,
+    "customer_last_name": pl.Utf8,
+    "street1": pl.Utf8,
+    "city": pl.Utf8,
+    "state_province": pl.Utf8,
+    "zip_postcode": pl.Utf8,
+    "primary_email": pl.Utf8,
+    "primary_phone": pl.Utf8,
+    "custom_attribute1": pl.Utf8,
+    "custom_attribute2": pl.Utf8,
+    "custom_attribute3": pl.Utf8,
+    "coverages": pl.Utf8,
+    "contents_task_sent": pl.Boolean,
+    "contents_task_at": pl.Datetime("us", "UTC"),
+    "xa_autolink_fail": pl.Boolean,
+    "xa_autolink_fail_at": pl.Datetime("us", "UTC"),
+    "trace_id": pl.Utf8,
+    "created_at": pl.Datetime("us", "UTC"),
+    "updated_at": pl.Datetime("us", "UTC"),
+    "last_enriched_at": pl.Datetime("us", "UTC"),
+}
+
+TASKS_SCHEMA = {
+    "assignment_id": pl.Int64,
+    "task_id": pl.Int64,
+    "project_id": pl.Utf8,
+    "assignee_id": pl.Int64,
+    "assignor_id": pl.Int64,
+    "date_assigned": pl.Utf8,
+    "date_completed": pl.Utf8,
+    "status": pl.Utf8,
+    "stp_enabled": pl.Boolean,
+    "mfn": pl.Utf8,
+    "trace_id": pl.Utf8,
+    "created_at": pl.Datetime("us", "UTC"),
+    "updated_at": pl.Datetime("us", "UTC"),
+    "last_enriched_at": pl.Datetime("us", "UTC"),
+}
+
+TASK_TEMPLATES_SCHEMA = {
+    "task_id": pl.Int64,
+    "comp_id": pl.Int64,
+    "name": pl.Utf8,
+    "description": pl.Utf8,
+    "form_id": pl.Utf8,
+    "form_name": pl.Utf8,
+    "enabled": pl.Boolean,
+    "is_default": pl.Boolean,
+    "is_manual_delivery": pl.Boolean,
+    "is_external_link_delivery": pl.Boolean,
+    "provide_portal_access": pl.Boolean,
+    "notify_assigned_send_recipient": pl.Boolean,
+    "notify_assigned_send_recipient_sms": pl.Boolean,
+    "notify_assigned_subject": pl.Utf8,
+    "notify_task_completed": pl.Boolean,
+    "notify_completed_subject": pl.Utf8,
+    "allow_resubmit": pl.Boolean,
+    "auto_generate_pdf": pl.Boolean,
+    "modified_by": pl.Utf8,
+    "modified_by_id": pl.Int64,
+    "modified_date": pl.Utf8,
+    "trace_id": pl.Utf8,
+    "created_at": pl.Datetime("us", "UTC"),
+    "updated_at": pl.Datetime("us", "UTC"),
+    "last_enriched_at": pl.Datetime("us", "UTC"),
+}
+
+EXTERNAL_LINKS_SCHEMA = {
+    "link_id": pl.Int64,
+    "assignment_id": pl.Int64,
+    "project_id": pl.Utf8,
+    "link_code": pl.Utf8,
+    "url": pl.Utf8,
+    "notification_access_method": pl.Utf8,
+    "country_id": pl.Int64,
+    "state_id": pl.Int64,
+    "created_date": pl.Utf8,
+    "accessed_count": pl.Int64,
+    "last_accessed": pl.Utf8,
+    "trace_id": pl.Utf8,
+    "created_at": pl.Utf8,
+    "updated_at": pl.Utf8,
+}
+
+VIDEO_COLLAB_SCHEMA = {
+    "video_collaboration_id": pl.Int64,
+    "claim_id": pl.Int64,
+    "mfn": pl.Utf8,
+    "claim_number": pl.Utf8,
+    "policy_number": pl.Utf8,
+    "email_user_name": pl.Utf8,
+    "claim_rep_first_name": pl.Utf8,
+    "claim_rep_last_name": pl.Utf8,
+    "claim_rep_full_name": pl.Utf8,
+    "number_of_videos": pl.Int64,
+    "number_of_photos": pl.Int64,
+    "number_of_viewers": pl.Int64,
+    "session_count": pl.Int64,
+    "total_time_seconds": pl.Utf8,
+    "total_time": pl.Utf8,
+    "created_date": pl.Utf8,
+    "live_call_first_session": pl.Utf8,
+    "live_call_last_session": pl.Utf8,
+    "company_id": pl.Int64,
+    "company_name": pl.Utf8,
+    "guid": pl.Utf8,
+    "trace_id": pl.Utf8,
+    "created_at": pl.Datetime("us", "UTC"),
+    "updated_at": pl.Datetime("us", "UTC"),
+    "last_enriched_at": pl.Datetime("us", "UTC"),
+}
+
+# Map table names to their schema definitions
+TABLE_SCHEMAS: dict[str, dict[str, pl.DataType]] = {
+    "contacts": CONTACTS_SCHEMA,
+    "media": MEDIA_SCHEMA,
+    "projects": PROJECTS_SCHEMA,
+    "tasks": TASKS_SCHEMA,
+    "task_templates": TASK_TEMPLATES_SCHEMA,
+    "external_links": EXTERNAL_LINKS_SCHEMA,
+    "video_collab": VIDEO_COLLAB_SCHEMA,
+}
+
+
+# Merge keys for each entity table (from verisk_pipeline)
+MERGE_KEYS: dict[str, list[str]] = {
+    "projects": ["project_id"],
+    "contacts": ["project_id", "contact_email", "contact_type"],
+    "media": ["media_id"],
+    "tasks": ["assignment_id"],
+    "task_templates": ["task_id"],
+    "external_links": ["link_id"],
+    "video_collab": ["video_collaboration_id"],
+}
+
+
+class ClaimXEntityWriter:
+    """Manages writes to all ClaimX entity Delta tables.
+
+    Uses merge operations with appropriate keys for idempotency.
+    """
+
+    def __init__(
+        self,
+        projects_table_path: str,
+        contacts_table_path: str,
+        media_table_path: str,
+        tasks_table_path: str,
+        task_templates_table_path: str,
+        external_links_table_path: str,
+        video_collab_table_path: str,
+    ):
+        """
+        Initialize ClaimX entity writer with table paths.
+
+        Args:
+            projects_table_path: Full abfss:// path to claimx_projects table
+            contacts_table_path: Full abfss:// path to claimx_contacts table
+            media_table_path: Full abfss:// path to claimx_attachment_metadata table
+            tasks_table_path: Full abfss:// path to claimx_tasks table
+            task_templates_table_path: Full abfss:// path to claimx_task_templates table
+            external_links_table_path: Full abfss:// path to claimx_external_links table
+            video_collab_table_path: Full abfss:// path to claimx_video_collab table
+        """
+        self.logger = logging.getLogger(self.__class__.__name__)
+
+        table_paths = {
+            "projects": projects_table_path,
+            "contacts": contacts_table_path,
+            "media": media_table_path,
+            "tasks": tasks_table_path,
+            "task_templates": task_templates_table_path,
+            "external_links": external_links_table_path,
+            "video_collab": video_collab_table_path,
+        }
+        empty_paths = [name for name, path in table_paths.items() if not path]
+        if empty_paths:
+            env_var_hints = {
+                "projects": "CLAIMX_DELTA_PROJECTS_TABLE",
+                "contacts": "CLAIMX_DELTA_CONTACTS_TABLE",
+                "media": "CLAIMX_DELTA_MEDIA_TABLE",
+                "tasks": "CLAIMX_DELTA_TASKS_TABLE",
+                "task_templates": "CLAIMX_DELTA_TASK_TEMPLATES_TABLE",
+                "external_links": "CLAIMX_DELTA_EXTERNAL_LINKS_TABLE",
+                "video_collab": "CLAIMX_DELTA_VIDEO_COLLAB_TABLE",
+            }
+            missing_info = [f"{name} ({env_var_hints[name]})" for name in empty_paths]
+            raise ValueError(
+                f"ClaimXEntityWriter requires table paths for all entity types. "
+                f"Missing paths for: {', '.join(missing_info)}. "
+                f"Set the corresponding environment variables."
+            )
+
+        # Create individual writers for each entity table
+        # Projects and Media are partitioned by project_id
+        # Others use the default (no partitioning)
+        self._writers: dict[str, BaseDeltaWriter] = {
+            "projects": BaseDeltaWriter(
+                table_path=projects_table_path,
+                partition_column="project_id",
+            ),
+            "contacts": BaseDeltaWriter(
+                table_path=contacts_table_path,
+            ),
+            "media": BaseDeltaWriter(
+                table_path=media_table_path,
+                partition_column="project_id",
+            ),
+            "tasks": BaseDeltaWriter(
+                table_path=tasks_table_path,
+            ),
+            "task_templates": BaseDeltaWriter(
+                table_path=task_templates_table_path,
+            ),
+            "external_links": BaseDeltaWriter(
+                table_path=external_links_table_path,
+            ),
+            "video_collab": BaseDeltaWriter(
+                table_path=video_collab_table_path,
+            ),
+        }
+
+        self.logger.info(
+            "Initialized ClaimXEntityWriter",
+            extra={
+                "tables": list(self._writers.keys()),
+            },
+        )
+
+    # Entity type attribute names on EntityRowsMessage (in write order)
+    _ENTITY_TYPES = (
+        "projects", "contacts", "media", "tasks",
+        "task_templates", "external_links", "video_collab",
+    )
+
+    async def write_all(self, entity_rows: EntityRowsMessage) -> dict[str, int]:
+        """
+        Write all entity rows to their respective Delta tables.
+
+        Uses merge (upsert) operations for all tables except contacts/media (append-only).
+
+        Args:
+            entity_rows: EntityRowsMessage with data for each table
+
+        Returns:
+            Dict mapping table name to rows written
+        """
+        counts: dict[str, int] = {}
+
+        for entity_type in self._ENTITY_TYPES:
+            rows = getattr(entity_rows, entity_type, None)
+            if rows:
+                result = await self._write_table(entity_type, rows)
+                if result is not None:
+                    counts[entity_type] = result
+
+        self.logger.info(
+            f"Write cycle complete: {sum(counts.values())} total rows across {len(counts)} tables",
+            extra={
+                "tables_written": counts,
+                "total_rows": sum(counts.values()),
+                "table_count": len(counts),
+            },
+        )
+
+        return counts
+
+    # Tables that use append-only writes (no merge)
+    _APPEND_ONLY_TABLES = frozenset({"contacts", "media"})
+
+    def _ensure_timestamp_columns(self, df: pl.DataFrame) -> pl.DataFrame:
+        """Ensure created_at and updated_at columns have non-null values."""
+        now = datetime.now(UTC)
+        for col in ("created_at", "updated_at"):
+            if col not in df.columns:
+                df = df.with_columns(pl.lit(now).alias(col))
+            else:
+                df = df.with_columns(pl.col(col).fill_null(now))
+        return df
+
+    async def _write_table(
+        self,
+        table_name: str,
+        rows: list[dict[str, Any]],
+    ) -> int | None:
+        """
+        Write rows to a specific entity table using merge or append.
+
+        Args:
+            table_name: Name of the entity table
+            rows: List of row dicts to write
+
+        Returns:
+            Number of rows affected, or None on error
+        """
+        if not rows:
+            return 0
+
+        writer = self._writers.get(table_name)
+        merge_keys = MERGE_KEYS.get(table_name)
+        if not writer or not merge_keys:
+            self.logger.warning(f"No writer/merge keys for table: {table_name}", extra={"table_name": table_name})
+            return None
+
+        try:
+            df = self._create_dataframe_with_schema(table_name, rows)
+            df = self._ensure_timestamp_columns(df)
+
+            if table_name in self._APPEND_ONLY_TABLES:
+                success = await writer._async_append(df)
+            elif table_name == "task_templates":
+                success = await writer._async_merge(
+                    df,
+                    merge_keys=merge_keys,
+                    preserve_columns=["created_at"],
+                    update_condition="source.modified_date <> target.modified_date OR target.modified_date IS NULL",
+                )
+            else:
+                success = await writer._async_merge(df, merge_keys=merge_keys, preserve_columns=["created_at"])
+
+            if success:
+                self.logger.info(f"Wrote {len(df)} rows to {table_name}", extra={"table_name": table_name, "rows_written": len(df)})
+                return len(df)
+
+            self.logger.error(f"{table_name} table write failed", extra={"table_name": table_name, "row_count": len(rows)})
+            return None
+
+        except Exception as e:
+            self.logger.error(f"Error writing to {table_name} table", extra={"table_name": table_name, "row_count": len(rows), "error": str(e)}, exc_info=True)
+            return None
+
+    @staticmethod
+    def _coerce_value(val: Any, col_type: pl.DataType) -> Any:
+        """Coerce a string value to a native Python type matching the Polars schema."""
+        if not isinstance(val, str):
+            return val
+        if col_type == pl.Datetime("us", "UTC"):
+            return datetime.fromisoformat(val.replace("Z", "+00:00"))
+        if col_type == pl.Date:
+            if "T" in val:
+                return datetime.fromisoformat(val.replace("Z", "+00:00")).date()
+            return date.fromisoformat(val)
+        return val
+
+    def _create_dataframe_with_schema(
+        self, table_name: str, rows: list[dict[str, Any]]
+    ) -> pl.DataFrame:
+        """
+        Create DataFrame with explicit schema to prevent type inference issues.
+
+        Pre-converts ISO timestamp/date strings to native Python types since
+        Polars cannot coerce strings to datetime/date with explicit schemas.
+        """
+        if not rows:
+            return pl.DataFrame(rows)
+
+        table_schema = TABLE_SCHEMAS.get(table_name)
+        if not table_schema:
+            return pl.DataFrame(rows)
+
+        all_columns: set[str] = set()
+        for row in rows:
+            all_columns.update(row.keys())
+
+        schema = {col: table_schema[col] for col in all_columns if col in table_schema}
+
+        converted_rows = []
+        for row in rows:
+            converted_row = dict(row)
+            for col_name, col_type in schema.items():
+                if col_name in converted_row and converted_row[col_name] is not None:
+                    converted_row[col_name] = self._coerce_value(converted_row[col_name], col_type)
+            converted_rows.append(converted_row)
+
+        return pl.DataFrame(converted_rows, schema=schema)
+
+
+__all__ = ["ClaimXEntityWriter", "MERGE_KEYS", "TABLE_SCHEMAS"]

@@ -1,0 +1,23 @@
+{
+  "eventType": "CUSTOM_TASK_COMPLETED",
+  "projectId": 6011098,
+  "masterFileName": null,
+  "mediaId": null,
+  "taskAssignmentId": 5563715,
+  "mediaIds": [
+    98269686,
+    98269668,
+    98269651,
+    98269632,
+    98269615,
+    98269603,
+    98269597,
+    98269585,
+    98269572,
+    98269506,
+    98269505,
+    98269443
+  ],
+  "videoCollaborationId": null,
+  "IngestionTime": null
+}
