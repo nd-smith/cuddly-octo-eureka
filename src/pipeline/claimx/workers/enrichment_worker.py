@@ -1052,7 +1052,7 @@ class ClaimXEnrichmentWorker:
 
             except Exception as e:
                 logger.error(
-                    "Failed to produce download task",
+                    "Failed to produce download task - routing to retry",
                     extra={
                         "trace_id": task.trace_id,
                         "media_id": task.media_id,
@@ -1060,6 +1060,19 @@ class ClaimXEnrichmentWorker:
                         "error": str(e),
                     },
                     exc_info=True,
+                )
+                now = datetime.now(UTC)
+                enrichment_task = ClaimXEnrichmentTask(
+                    trace_id=task.trace_id,
+                    project_id=task.project_id,
+                    event_type="DOWNLOAD_TASK_PRODUCTION_FAILED",
+                    retry_count=task.retry_count,
+                    created_at=now,
+                    ingested_at=now,
+                    media_id=task.media_id,
+                )
+                await self._handle_enrichment_failure(
+                    enrichment_task, e, ErrorCategory.TRANSIENT,
                 )
 
     async def _handle_enrichment_failure(
