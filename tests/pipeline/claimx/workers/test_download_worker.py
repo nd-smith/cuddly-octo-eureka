@@ -40,6 +40,7 @@ def mock_config():
     config.claimx_api_token = "test-token"
     config.claimx_api_timeout_seconds = 30
     config.claimx_api_concurrency = 10
+    config.get_worker_setting.side_effect = lambda *args, default=None, **kwargs: default
     return config
 
 

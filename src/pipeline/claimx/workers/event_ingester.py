@@ -96,15 +96,16 @@ class ClaimXEventIngesterWorker:
         # Hybrid dedup: in-memory cache (fast path) + blob storage (persistent)
         # OrderedDict for O(1) LRU eviction: trace_id -> timestamp
         self._dedup_cache: OrderedDict[str, float] = OrderedDict()
-        self._dedup_cache_ttl_seconds = 86400  # 24 hours (matches Verisk)
-        self._dedup_cache_max_size = 100_000  # ~2MB memory for 100k entries
+        self._dedup_cache_ttl_seconds = config.get_worker_setting(domain, "event_ingester", "dedup_cache_ttl_seconds", default=86400)
+        self._dedup_cache_max_size = config.get_worker_setting(domain, "event_ingester", "dedup_cache_max_size", default=100_000)
 
         # Persistent blob storage (survives worker restarts)
         self._dedup_store: DedupStoreProtocol | None = None
         self._dedup_worker_name = "claimx-event-ingester"
         self._dedup_cleanup_task: asyncio.Task | None = None
         self._blob_write_tasks: set[asyncio.Task] = set()
-        self._blob_semaphore = asyncio.Semaphore(50)
+        _blob_concurrency = config.get_worker_setting(domain, "event_ingester", "blob_semaphore", default=50)
+        self._blob_semaphore = asyncio.Semaphore(_blob_concurrency)
         health_port = 0
         health_enabled = True
         self.health_server = HealthCheckServer(

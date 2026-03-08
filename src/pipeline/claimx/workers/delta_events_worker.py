@@ -93,11 +93,11 @@ class ClaimXDeltaEventsWorker:
             self.worker_id = self.WORKER_NAME
 
         # Batch configuration
-        self.batch_size = 100
-        self.batch_timeout_seconds = 30.0
+        self.batch_size = config.get_worker_setting(domain, "delta_events", "batch_size", default=100)
+        self.batch_timeout_seconds = config.get_worker_setting(domain, "delta_events", "batch_timeout_seconds", default=30.0)
 
         # Retry configuration
-        self._retry_delays = [300, 600, 1200, 2400]
+        self._retry_delays = config.get_worker_setting(domain, "delta_events", "retry_delays", default=[300, 600, 1200, 2400])
 
         # Batch state
         self._batch: list[dict[str, Any]] = []

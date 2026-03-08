@@ -32,6 +32,7 @@ def mock_config():
     config = Mock(spec=MessageConfig)
     config.get_topic.return_value = "claimx.events"
     config.get_consumer_group.return_value = "claimx-delta-events-writer"
+    config.get_worker_setting.side_effect = lambda *args, default=None, **kwargs: default
 
     return config
 
@@ -307,6 +308,7 @@ class TestDeltaEventsWorkerBatching:
         """Worker accumulates events in batch."""
         # Create config with batch_size=10
         config = Mock(spec=MessageConfig)
+        config.get_worker_setting.side_effect = lambda *args, default=None, **kwargs: default
         config.get_topic.return_value = "claimx.events"
         config.get_consumer_group.return_value = "claimx-delta-events-writer"
 
@@ -330,6 +332,7 @@ class TestDeltaEventsWorkerBatching:
         """Worker flushes batch when size threshold reached."""
         # Create config with batch_size=2
         config = Mock(spec=MessageConfig)
+        config.get_worker_setting.side_effect = lambda *args, default=None, **kwargs: default
         config.get_topic.return_value = "claimx.events"
         config.get_consumer_group.return_value = "claimx-delta-events-writer"
 

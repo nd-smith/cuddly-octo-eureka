@@ -112,8 +112,8 @@ class ClaimXUploadWorker:
                 "  - ONELAKE_CLAIMX_PATH env var"
             )
 
-        self.concurrency = 10
-        self.batch_size = 100
+        self.concurrency = config.get_worker_setting(domain, "upload", "concurrency", default=10)
+        self.batch_size = config.get_worker_setting(domain, "upload", "batch_size", default=100)
 
         # Topics to consume from
         self.topics = [config.get_topic(domain, "downloads_cached")]

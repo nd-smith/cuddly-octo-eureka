@@ -127,6 +127,8 @@ class ClaimXDownloadWorker:
         self.cache_dir = Path(config.cache_dir) / domain
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
+        self.download_timeout: int = config.get_worker_setting(domain, "download", "timeout", default=300)
+
         self.concurrency = CONCURRENCY
         self.batch_size = BATCH_SIZE
 
@@ -655,15 +657,14 @@ class ClaimXDownloadWorker:
 
             # Check if presigned URL will expire during download window
             url_info = check_presigned_url(task_message.download_url)
-            download_timeout = 300  # seconds
-            if url_info.expires_within(download_timeout):
+            if url_info.expires_within(self.download_timeout):
                 logger.info(
                     "Presigned URL expires within download window, routing to retry",
                     extra={
                         "trace_id": task_message.trace_id,
                         "media_id": task_message.media_id,
                         "seconds_remaining": url_info.seconds_remaining,
-                        "download_timeout": download_timeout,
+                        "download_timeout": self.download_timeout,
                     },
                 )
                 outcome = DownloadOutcome(
@@ -730,7 +731,7 @@ class ClaimXDownloadWorker:
         return DownloadTask(
             url=task_message.download_url,
             destination=temp_file,
-            timeout=300,
+            timeout=self.download_timeout,
             validate_url=True,
             validate_file_type=True,
             allow_localhost=False,

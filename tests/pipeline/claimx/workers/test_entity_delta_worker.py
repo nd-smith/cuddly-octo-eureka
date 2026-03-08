@@ -34,6 +34,7 @@ def mock_config():
     config = Mock(spec=MessageConfig)
     config.get_topic.return_value = "claimx.enriched"
     config.get_consumer_group.return_value = "claimx-entity-delta-writer"
+    config.get_worker_setting.side_effect = lambda *args, default=None, **kwargs: default
 
     return config
 
@@ -119,6 +120,7 @@ class TestEntityDeltaWorkerInitialization:
     def test_initialization_with_separate_producer_config(self, mock_config):
         """Worker accepts separate producer config."""
         producer_config = Mock(spec=MessageConfig)
+        producer_config.get_worker_setting.side_effect = lambda *args, default=None, **kwargs: default
         worker = ClaimXEntityDeltaWorker(
             config=mock_config,
             projects_table_path="abfss://test/projects",
@@ -305,6 +307,7 @@ class TestEntityDeltaWorkerBatching:
         """Worker accumulates entity rows in batch."""
         # Create config with custom batch size
         config = Mock(spec=MessageConfig)
+        config.get_worker_setting.side_effect = lambda *args, default=None, **kwargs: default
         config.get_topic.return_value = "claimx.enriched"
         config.get_consumer_group.return_value = "claimx-entity-delta-writer"
 
@@ -332,6 +335,7 @@ class TestEntityDeltaWorkerBatching:
         """Worker flushes batch when size threshold reached."""
         # Create config with batch_size=2
         config = Mock(spec=MessageConfig)
+        config.get_worker_setting.side_effect = lambda *args, default=None, **kwargs: default
         config.get_topic.return_value = "claimx.enriched"
         config.get_consumer_group.return_value = "claimx-entity-delta-writer"
 

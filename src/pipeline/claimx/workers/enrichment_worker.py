@@ -102,11 +102,22 @@ class ClaimXEnrichmentWorker:
             self.worker_id = self.WORKER_NAME
 
         self.consumer_group = config.get_consumer_group(domain, "enrichment_worker")
-        self.batch_size = 50
-        self.batch_timeout_ms = 1000
+        self.batch_size = config.get_worker_setting(domain, "enrichment", "batch_size", default=50)
+        self.batch_timeout_ms = config.get_worker_setting(domain, "enrichment", "batch_timeout_ms", default=1000)
 
         self._retry_delays = config.get_retry_delays(domain)
         self._max_retries = config.get_max_retries(domain)
+
+        # ITEL routing config (overrides class-level defaults)
+        itel_task_ids = config.get_worker_setting(domain, "enrichment", "itel_task_ids", default=None)
+        if itel_task_ids is not None:
+            self.ITEL_TASK_IDS = set(itel_task_ids)
+        itel_topic = config.get_worker_setting(domain, "enrichment", "itel_pending_topic", default=None)
+        if itel_topic is not None:
+            self.ITEL_PENDING_TOPIC = itel_topic
+        itel_question = config.get_worker_setting(domain, "enrichment", "itel_cabinet_damage_question", default=None)
+        if itel_question is not None:
+            self.ITEL_CABINET_DAMAGE_QUESTION = itel_question
 
         self.producer = None
         self.download_producer = None
@@ -288,7 +299,7 @@ class ClaimXEnrichmentWorker:
                 await self._close_resource(attr)
             raise
 
-    # Task IDs that route to the ITEL cabinet pending topic
+    # ITEL routing defaults (overridable via config in __init__)
     ITEL_TASK_IDS = {32615, 24454}
     ITEL_PENDING_TOPIC = "pcesdopodappv1-itel-cabinet-pending"
     ITEL_CABINET_DAMAGE_QUESTION = "Kitchen cabinet damage present"

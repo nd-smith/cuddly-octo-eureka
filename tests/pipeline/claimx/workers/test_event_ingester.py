@@ -60,6 +60,7 @@ def mock_config():
     config = Mock(spec=MessageConfig)
     config.get_topic.return_value = "claimx.events.raw"
     config.get_consumer_group.return_value = "claimx-event-ingester"
+    config.get_worker_setting.side_effect = lambda *args, default=None, **kwargs: default
     return config
 
 
@@ -123,6 +124,7 @@ class TestEventIngesterInitialization:
     def test_initialization_with_separate_producer_config(self, mock_config):
         """Worker accepts separate producer config."""
         producer_config = Mock(spec=MessageConfig)
+        producer_config.get_worker_setting.side_effect = lambda *args, default=None, **kwargs: default
         worker = ClaimXEventIngesterWorker(config=mock_config, producer_config=producer_config)
 
         assert worker.consumer_config is mock_config

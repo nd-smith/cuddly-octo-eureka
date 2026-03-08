@@ -32,6 +32,7 @@ from pipeline.common.types import PipelineMessage
 def mock_config():
     """Mock MessageConfig with standard settings."""
     config = Mock(spec=MessageConfig)
+    config.get_worker_setting.side_effect = lambda *args, default=None, **kwargs: default
     config.get_topic.return_value = "claimx.downloads.results"
     config.get_consumer_group.return_value = "claimx-result-processor"
 

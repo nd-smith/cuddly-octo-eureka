@@ -89,12 +89,12 @@ class ClaimXEntityDeltaWorker:
         writer_paths = {k: table_paths.get(k, "") for k in self._TABLE_PATH_KEYS}
         self.entity_writer = ClaimXEntityWriter(**writer_paths)
 
-        self.batch_size = 100
-        self.batch_timeout_seconds = 30.0
-        self.max_retries = 3
+        self.batch_size = config.get_worker_setting(domain, "entity_delta", "batch_size", default=100)
+        self.batch_timeout_seconds = config.get_worker_setting(domain, "entity_delta", "batch_timeout_seconds", default=30.0)
+        self.max_retries = config.get_worker_setting(domain, "entity_delta", "max_retries", default=3)
 
         # Retry config
-        self._retry_delays = [60, 300, 900]
+        self._retry_delays = config.get_worker_setting(domain, "entity_delta", "retry_delays", default=[60, 300, 900])
         self._retry_topic_prefix = f"{entity_rows_topic}.retry"
         self._dlq_topic = f"{entity_rows_topic}.dlq"
 

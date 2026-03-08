@@ -189,6 +189,16 @@ class MessageConfig:
             return self.claimx
         return {}
 
+    def get_worker_setting(
+        self, domain: str, worker_name: str, key: str, default: Any = None,
+    ) -> Any:
+        """Get a worker-specific config value: pipeline.<domain>.<worker_name>.<key>."""
+        domain_config = self._get_domain_config(domain)
+        worker_config = domain_config.get(worker_name, {})
+        if isinstance(worker_config, dict):
+            return worker_config.get(key, default)
+        return default
+
     def get_topic(self, domain: str, topic_key: str) -> str:
         """Get topic name as "domain.topic_key"."""
         return f"{domain}.{topic_key}"

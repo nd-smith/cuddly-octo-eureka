@@ -45,6 +45,7 @@ def mock_config():
     config.claimx_api_token = "test-token"
     config.claimx_api_timeout_seconds = 30
     config.claimx_api_concurrency = 10
+    config.get_worker_setting.side_effect = lambda *args, default=None, **kwargs: default
     return config
 
 
@@ -150,6 +151,7 @@ class TestEnrichmentWorkerInitialization:
         """Worker accepts separate producer config."""
         with patch("pipeline.claimx.workers.enrichment_worker.ProjectCache"):
             producer_config = Mock(spec=MessageConfig)
+            producer_config.get_worker_setting.side_effect = lambda *args, default=None, **kwargs: default
             worker = ClaimXEnrichmentWorker(config=mock_config, producer_config=producer_config)
 
             assert worker.consumer_config is mock_config
