@@ -242,6 +242,26 @@ class MessageConfig:
                 raise ValueError(f"cache_dir not writable: {cache_path}")
 
 
+def validate_no_unresolved_vars(config: dict[str, Any], path: str = "") -> None:
+    """Fail fast if any config values contain unexpanded ${VAR} references."""
+    for key, value in config.items():
+        full_key = f"{path}.{key}" if path else key
+        if isinstance(value, dict):
+            validate_no_unresolved_vars(value, full_key)
+        elif isinstance(value, list):
+            for i, item in enumerate(value):
+                if isinstance(item, dict):
+                    validate_no_unresolved_vars(item, f"{full_key}[{i}]")
+                elif isinstance(item, str) and "${" in item and "}" in item:
+                    raise ValueError(
+                        f"Unresolved env var in config key '{full_key}[{i}]': {item}"
+                    )
+        elif isinstance(value, str) and "${" in value and "}" in value:
+            raise ValueError(
+                f"Unresolved env var in config key '{full_key}': {value}"
+            )
+
+
 def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
     """Deep merge overlay into base dict."""
     result = base.copy()
@@ -269,6 +289,7 @@ def load_config(
     logger.info("Loading configuration from file: %s", config_path)
     yaml_data = load_yaml(config_path)
     yaml_data = _expand_env_vars(yaml_data)
+    validate_no_unresolved_vars(yaml_data)
 
     if "pipeline" not in yaml_data:
         raise ValueError(
