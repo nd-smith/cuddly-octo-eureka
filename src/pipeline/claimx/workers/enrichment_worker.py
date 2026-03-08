@@ -40,6 +40,7 @@ from pipeline.common.log_fields import producer_log_fields
 from pipeline.common.metrics import (
     record_delta_write,
     record_processing_error,
+    record_retry_terminal,
 )
 from pipeline.common.storage.delta import DeltaTableReader
 from pipeline.common.consumer_config import ConsumerConfig
@@ -565,6 +566,8 @@ class ClaimXEnrichmentWorker:
             self._records_processed += 1
             if result.success:
                 self._records_succeeded += 1
+                if task.retry_count > 0:
+                    record_retry_terminal(self.domain, "success", task.retry_count)
                 if result.rows:
                     all_entity_rows.merge(result.rows)
             else:
@@ -898,6 +901,8 @@ class ClaimXEnrichmentWorker:
 
             entity_rows = handler_result.rows
             self._records_succeeded += 1
+            if task.retry_count > 0:
+                record_retry_terminal(self.domain, "success", task.retry_count)
 
             await self._route_itel_events(task, event, entity_rows)
             await self._dispatch_entity_rows(task, entity_rows)

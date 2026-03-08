@@ -5,12 +5,14 @@ Writes entity data to 7 Delta tables using merge operations for idempotency.
 
 import asyncio
 import logging
+import time
 from datetime import UTC, date, datetime
 from typing import Any
 
 import polars as pl
 
 from pipeline.claimx.schemas.entities import EntityRowsMessage
+from pipeline.common.metrics import delta_write_duration_seconds
 from pipeline.common.writers.base import BaseDeltaWriter
 
 # Schema definitions matching actual Delta table schemas
@@ -366,6 +368,24 @@ class ClaimXEntityWriter:
 
         return counts, failed_tables
 
+    async def validate_writers(self) -> None:
+        """Validate all configured Delta table paths are accessible."""
+        errors: list[str] = []
+        for table_name, writer in self._writers.items():
+            try:
+                await writer.validate_path()
+            except RuntimeError as e:
+                errors.append(f"{table_name}: {e}")
+        if errors:
+            raise RuntimeError(
+                f"Delta table validation failed for {len(errors)} table(s):\n"
+                + "\n".join(f"  - {e}" for e in errors)
+            )
+        self.logger.info(
+            "All Delta table paths validated",
+            extra={"table_count": len(self._writers)},
+        )
+
     # All tables now use merge for idempotency (prevents duplicates on reprocessing)
     _APPEND_ONLY_TABLES: frozenset[str] = frozenset()
 
@@ -410,9 +430,12 @@ class ClaimXEntityWriter:
             df = self._create_dataframe_with_schema(table_name, rows)
             df = self._ensure_timestamp_columns(df)
 
+            t0 = time.perf_counter()
             if table_name in self._APPEND_ONLY_TABLES:
+                operation = "append"
                 success = await writer._async_append(df)
             elif table_name == "task_templates":
+                operation = "merge"
                 success = await writer._async_merge(
                     df,
                     merge_keys=merge_keys,
@@ -420,9 +443,13 @@ class ClaimXEntityWriter:
                     update_condition="source.modified_date <> target.modified_date OR target.modified_date IS NULL",
                 )
             else:
+                operation = "merge"
                 success = await writer._async_merge(
                     df, merge_keys=merge_keys, preserve_columns=["created_at"]
                 )
+            delta_write_duration_seconds.labels(table=table_name, operation=operation).observe(
+                time.perf_counter() - t0
+            )
 
             if success:
                 self.logger.info(

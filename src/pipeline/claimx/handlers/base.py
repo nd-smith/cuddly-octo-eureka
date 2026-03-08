@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import time
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -23,6 +24,7 @@ from pipeline.claimx.schemas.entities import EntityRowsMessage
 from pipeline.claimx.schemas.events import ClaimXEventMessage
 from pipeline.common.logging import extract_log_context
 from pipeline.common.metrics import (
+    claimx_api_latency_seconds,
     claimx_handler_duration_seconds,
     claimx_handler_events_total,
 )
@@ -218,11 +220,19 @@ class EventHandler(ABC):
         base_delay: float = 1.0,
     ) -> T:
         """Retry transient API errors locally before escalating to pipeline retry."""
+        t0 = time.perf_counter()
         for attempt in range(max_attempts):
             try:
-                return await coro_factory()
+                result = await coro_factory()
+                claimx_api_latency_seconds.labels(
+                    handler_name=self.name, status="success",
+                ).observe(time.perf_counter() - t0)
+                return result
             except ClaimXApiError as e:
                 if not e.is_retryable or attempt == max_attempts - 1:
+                    claimx_api_latency_seconds.labels(
+                        handler_name=self.name, status="error",
+                    ).observe(time.perf_counter() - t0)
                     raise
                 delay = base_delay * (2 ** attempt)
                 logger.info(

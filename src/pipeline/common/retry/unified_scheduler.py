@@ -20,6 +20,7 @@ from config.config import MessageConfig
 from core.logging.periodic_logger import PeriodicStatsLogger
 from core.logging.utilities import detect_log_output_mode, log_startup_banner
 from pipeline.common.decorators import set_log_context_from_message
+from pipeline.common.metrics import record_retry_terminal
 from pipeline.common.health import HealthCheckServer
 from pipeline.common.log_fields import message_log_fields, producer_log_fields
 from pipeline.common.retry.delay_queue import DelayedMessage, DelayQueue
@@ -441,6 +442,7 @@ class UnifiedRetryScheduler:
                 },
             )
             self._messages_exhausted += 1
+            record_retry_terminal(self.domain, "dlq", retry_count)
             await self._send_to_dlq(
                 message, f"Retries exhausted ({retry_count}/{self._max_retries})", headers,
             )

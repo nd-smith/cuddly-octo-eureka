@@ -260,6 +260,35 @@ circuit_breaker_calls_counter = _create_counter(
     labelnames=["name", "result"],
 )
 
+# Dedup cache
+dedup_cache_counter = _create_counter(
+    "pipeline_dedup_cache_total",
+    "Dedup cache lookups by result",
+    labelnames=["domain", "result"],  # result: hit, miss, blob_hit
+)
+
+dedup_blob_errors_counter = _create_counter(
+    "pipeline_dedup_blob_errors_total",
+    "Blob dedup persistence failures",
+    labelnames=["domain"],
+)
+
+# ClaimX API latency (per-handler)
+claimx_api_latency_seconds = _create_histogram(
+    "claimx_api_latency_seconds",
+    "ClaimX API call latency by handler",
+    labelnames=["handler_name", "status"],
+    buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0],
+)
+
+# Retry tracking — observed at terminal states (success or DLQ)
+retry_attempts_histogram = _create_histogram(
+    "pipeline_retry_attempts",
+    "Number of retries before message reached terminal state",
+    labelnames=["domain", "outcome"],  # outcome: success, dlq
+    buckets=[0, 1, 2, 3, 4, 5, 7, 10],
+)
+
 # Delta write duration
 delta_write_duration_seconds = _create_histogram(
     "delta_write_duration_seconds",
@@ -395,6 +424,21 @@ def update_disk_usage(path: str) -> None:
         pass
 
 
+def record_dedup_result(domain: str, result: str) -> None:
+    """Record a dedup cache lookup result. result: 'hit', 'miss', or 'blob_hit'."""
+    dedup_cache_counter.labels(domain=domain, result=result).inc()
+
+
+def record_dedup_blob_error(domain: str) -> None:
+    """Record a blob dedup persistence failure."""
+    dedup_blob_errors_counter.labels(domain=domain).inc()
+
+
+def record_retry_terminal(domain: str, outcome: str, retry_count: int) -> None:
+    """Record retry count at terminal state. outcome: 'success' or 'dlq'."""
+    retry_attempts_histogram.labels(domain=domain, outcome=outcome).observe(retry_count)
+
+
 __all__ = [
     # Metrics
     "messages_produced_counter",
@@ -418,6 +462,10 @@ __all__ = [
     "disk_usage_bytes_gauge",
     "disk_available_bytes_gauge",
     "disk_usage_ratio_gauge",
+    "dedup_cache_counter",
+    "dedup_blob_errors_counter",
+    "claimx_api_latency_seconds",
+    "retry_attempts_histogram",
     # Helper functions
     "record_message_produced",
     "record_message_consumed",
@@ -432,4 +480,7 @@ __all__ = [
     "update_circuit_breaker_state",
     "record_circuit_breaker_call",
     "update_disk_usage",
+    "record_dedup_result",
+    "record_dedup_blob_error",
+    "record_retry_terminal",
 ]

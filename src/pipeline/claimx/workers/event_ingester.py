@@ -28,6 +28,8 @@ from pipeline.common.eventhub.dedup_store import (
 from pipeline.common.health import HealthCheckServer
 from pipeline.common.metrics import (
     message_processing_duration_seconds,
+    record_dedup_blob_error,
+    record_dedup_result,
 )
 from pipeline.common.consumer_config import ConsumerConfig
 from pipeline.common.transport import (
@@ -456,8 +458,10 @@ class ClaimXEventIngesterWorker:
                 self._dedup_cache.move_to_end(trace_id)
                 self._dedup_memory_hits += 1
                 self._records_deduplicated += 1
+                record_dedup_result(self.domain, "hit")
                 return True
             del self._dedup_cache[trace_id]
+        record_dedup_result(self.domain, "miss")
         return False
 
     def _is_batch_or_memory_duplicate(
@@ -540,6 +544,7 @@ class ClaimXEventIngesterWorker:
                         timestamp = metadata.get("timestamp", time.time())
                         self._dedup_cache[trace_id] = timestamp
                         self._dedup_blob_hits += 1
+                        record_dedup_result(self.domain, "blob_hit")
                         return trace_id, True
                 except (TimeoutError, asyncio.TimeoutError):
                     logger.warning(
@@ -652,12 +657,14 @@ class ClaimXEventIngesterWorker:
                     "Blob storage write timed out (memory cache still updated)",
                     extra={"trace_id": trace_id, "timeout_seconds": self._BLOB_TIMEOUT_SECONDS},
                 )
+                record_dedup_blob_error(self.domain)
             except Exception as e:
                 logger.warning(
                     "Error persisting to blob storage (memory cache still updated)",
                     extra={"trace_id": trace_id, "error": str(e)},
                     exc_info=True,
                 )
+                record_dedup_blob_error(self.domain)
 
     # Prewarm cap: limit blob enumeration to avoid blocking startup
     _PREWARM_MAX_KEYS = 10_000
