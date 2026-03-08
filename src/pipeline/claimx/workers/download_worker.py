@@ -25,6 +25,7 @@ from core.download.range_download import (
     download_file_in_ranges,
 )
 from core.errors.exceptions import CircuitOpenError
+from core.security.presigned_urls import check_presigned_url
 from core.logging.context import set_log_context
 from core.logging.periodic_logger import PeriodicStatsLogger
 from core.logging.utilities import format_cycle_output, log_worker_error
@@ -651,6 +652,29 @@ class ClaimXDownloadWorker:
             )
 
             download_task = self._convert_to_download_task(task_message)
+
+            # Check if presigned URL will expire during download window
+            url_info = check_presigned_url(task_message.download_url)
+            download_timeout = 300  # seconds
+            if url_info.expires_within(download_timeout):
+                logger.info(
+                    "Presigned URL expires within download window, routing to retry",
+                    extra={
+                        "trace_id": task_message.trace_id,
+                        "media_id": task_message.media_id,
+                        "seconds_remaining": url_info.seconds_remaining,
+                        "download_timeout": download_timeout,
+                    },
+                )
+                outcome = DownloadOutcome(
+                    success=False,
+                    error="presigned_url_expiring",
+                    error_category=ErrorCategory.TRANSIENT,
+                )
+                processing_time_ms = int((time.perf_counter() - start_time) * 1000)
+                return await self._finalize_task(
+                    message, task_message, outcome, download_task, processing_time_ms,
+                )
 
             # HEAD request to determine download strategy
             content_length = await self._head_content_length(task_message.download_url)
