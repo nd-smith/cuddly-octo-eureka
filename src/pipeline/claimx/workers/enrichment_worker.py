@@ -526,7 +526,10 @@ class ClaimXEnrichmentWorker:
                 video_event_producer=self.video_event_producer,
             )
             try:
-                results = await handler.handle_batch(handler_events)
+                results = await asyncio.wait_for(
+                    handler.handle_batch(handler_events),
+                    timeout=120.0,
+                )
                 for result in results:
                     msg, task = event_to_info[id(result.event)]
                     all_results.append((result, msg, task))
@@ -873,7 +876,10 @@ class ClaimXEnrichmentWorker:
         )
 
         try:
-            handler_result = await handler.process([event])
+            handler_result = await asyncio.wait_for(
+                handler.process([event]),
+                timeout=120.0,
+            )
 
             if handler_result.failed > 0:
                 await self._handle_handler_failure(task, handler_result, handler_class)
@@ -977,10 +983,13 @@ class ClaimXEnrichmentWorker:
         try:
             trace_id = tasks[0].trace_id if tasks else batch_id
             entity_rows.trace_id = trace_id
-            await self.producer.send(
-                value=entity_rows,
-                key=trace_id,
-                headers={"trace_id": trace_id},
+            await asyncio.wait_for(
+                self.producer.send(
+                    value=entity_rows,
+                    key=trace_id,
+                    headers={"trace_id": trace_id},
+                ),
+                timeout=30.0,
             )
 
             logger.info(
@@ -1033,10 +1042,13 @@ class ClaimXEnrichmentWorker:
 
         for task in download_tasks:
             try:
-                metadata = await self.download_producer.send(
-                    value=task,
-                    key=task.trace_id,
-                    headers={"trace_id": task.trace_id},
+                metadata = await asyncio.wait_for(
+                    self.download_producer.send(
+                        value=task,
+                        key=task.trace_id,
+                        headers={"trace_id": task.trace_id},
+                    ),
+                    timeout=30.0,
                 )
 
                 logger.info(

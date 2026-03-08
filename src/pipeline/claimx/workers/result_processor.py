@@ -423,10 +423,13 @@ class ClaimXResultProcessor:
             df = pl.DataFrame(rows)
 
             # Write to Delta
-            await self.inventory_writer._async_merge(
-                df,
-                merge_keys=["media_id"],
-                preserve_columns=["created_at"],
+            await asyncio.wait_for(
+                self.inventory_writer._async_merge(
+                    df,
+                    merge_keys=["media_id"],
+                    preserve_columns=["created_at"],
+                ),
+                timeout=300.0,
             )
 
             record_delta_write(

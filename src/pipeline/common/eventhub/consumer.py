@@ -336,7 +336,7 @@ class EventHubConsumer:
 
         try:
             if self._consumer:
-                await self._consumer.close()
+                await asyncio.wait_for(self._consumer.close(), timeout=30.0)
 
             if self._dlq_producer is not None:
                 try:
@@ -861,11 +861,14 @@ class EventHubConsumer:
 
         try:
             # Send to DLQ Event Hub
-            metadata = await self._dlq_producer.send(
-                topic=dlq_entity_name,
-                key=dlq_key,
-                value=dlq_value,
-                headers=dlq_headers,
+            metadata = await asyncio.wait_for(
+                self._dlq_producer.send(
+                    topic=dlq_entity_name,
+                    key=dlq_key,
+                    value=dlq_value,
+                    headers=dlq_headers,
+                ),
+                timeout=30.0,
             )
 
             logger.info(

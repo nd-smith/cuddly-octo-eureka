@@ -524,10 +524,13 @@ class ClaimXUploadWorker:
             # Upload to OneLake (using claimx domain-specific path)
             if self.onelake_client is None:
                 raise RuntimeError("OneLake client not initialized - call start() first")
-            blob_path = await self.onelake_client.async_upload_file(
-                relative_path=cached_message.destination_path,
-                local_path=cache_path,
-                overwrite=True,
+            blob_path = await asyncio.wait_for(
+                self.onelake_client.async_upload_file(
+                    relative_path=cached_message.destination_path,
+                    local_path=cache_path,
+                    overwrite=True,
+                ),
+                timeout=300.0,
             )
 
             processing_time_ms = int((time.perf_counter() - start_time) * 1000)
