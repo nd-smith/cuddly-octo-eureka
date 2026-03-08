@@ -13,6 +13,7 @@ Architecture notes:
 import asyncio
 import json
 import logging
+import os
 import time
 import warnings
 from typing import Any
@@ -170,12 +171,21 @@ class EventHubProducer:
         )
 
         try:
-            props = await self._producer.get_eventhub_properties()
+            props = await asyncio.wait_for(
+                self._producer.get_eventhub_properties(), timeout=10.0,
+            )
             logger.info(
                 f"Connected to Event Hub: {props.get('name', 'unknown')}, "
                 f"partitions: {len(props.get('partition_ids', []))}"
             )
         except Exception as e:
+            env = os.getenv("ENVIRONMENT", "").lower()
+            if env == "production":
+                raise RuntimeError(
+                    f"Event Hub connectivity check failed in production for "
+                    f"'{self.eventhub_name}': {e}. Refusing to start with "
+                    f"unverified connectivity."
+                ) from e
             logger.warning(
                 "Could not fetch Event Hub properties (non-fatal), "
                 "connectivity will be verified on first send",

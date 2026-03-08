@@ -220,6 +220,26 @@ class BaseDeltaWriter:
             },
         )
 
+    async def validate_path(self) -> None:
+        """Verify the Delta table path is accessible.
+
+        Attempts to open the table at the configured path. Raises RuntimeError
+        if the path is unreachable or the table doesn't exist.
+        """
+        try:
+            from deltalake import DeltaTable
+            await asyncio.get_event_loop().run_in_executor(
+                None, DeltaTable, self.table_path,
+            )
+            self.logger.debug(
+                "Delta table path validated",
+                extra={"table_path": self.table_path},
+            )
+        except Exception as e:
+            raise RuntimeError(
+                f"Delta table not accessible at '{self.table_path}': {e}"
+            ) from e
+
     def _serialize_df(self, df: pl.DataFrame) -> bytes:
         """Serialize a Polars DataFrame to Arrow IPC bytes for subprocess transfer."""
         buf = io.BytesIO()

@@ -183,6 +183,9 @@ class ClaimXEntityDeltaWorker:
                 topic_key="enriched",
             )
 
+            # Validate Delta table paths are accessible
+            await self.entity_writer.validate_writers()
+
             # Initialize retry handler
             self.retry_handler = DeltaRetryHandler(
                 config=self.producer_config,
