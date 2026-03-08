@@ -126,6 +126,7 @@ def mock_config():
     config.get_retry_topic.return_value = "verisk.retry"
     config.get_topic.side_effect = _mock_get_topic
     config.get_max_retries.return_value = 3
+    config.retry_persistence_dir = "/tmp"
     return config
 
 

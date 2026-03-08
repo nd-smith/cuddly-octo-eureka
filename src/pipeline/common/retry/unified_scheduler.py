@@ -87,9 +87,9 @@ class UnifiedRetryScheduler:
     9. Offsets committed immediately (makes progress through queue)
 
     Crash safety:
-    - In-memory queue persisted to disk every 10 seconds
+    - In-memory queue persisted to disk every 3 seconds
     - Queue restored on startup
-    - On crash, at most 10 seconds of delayed messages may be lost
+    - On crash, at most 3 seconds of delayed messages may be lost
     - This is acceptable trade-off vs blocking entire queue
 
     Usage:
@@ -109,7 +109,7 @@ class UnifiedRetryScheduler:
         config: MessageConfig,
         domain: str,
         target_topic_keys: list[str],
-        persistence_interval_seconds: int = 10,
+        persistence_interval_seconds: int = 3,
         health_port: int = 8095,
         persistence_dir: str | None = None,
     ):
@@ -143,7 +143,7 @@ class UnifiedRetryScheduler:
         self._persistence_interval = persistence_interval_seconds
         self._stats_logger: PeriodicStatsLogger | None = None
 
-        base_dir = persistence_dir or "/tmp"
+        base_dir = persistence_dir or config.retry_persistence_dir or "/tmp"
         persistence_file = Path(base_dir) / f"{PERSISTENCE_FILE_PREFIX}{domain}_retry_queue.json"
         self._delay_queue = DelayQueue(domain, persistence_file)
 
