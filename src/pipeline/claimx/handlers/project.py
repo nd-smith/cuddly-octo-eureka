@@ -196,7 +196,9 @@ class ProjectHandler(EventHandler):
             return EntityRowsMessage()  # Return empty - project already in Delta
 
         # Project not in cache - fetch from API
-        response = await self.client.get_project(project_id)
+        response = await self._call_api_with_retry(
+            lambda: self.client.get_project(project_id)
+        )
         rows = EntityRowsMessage()
 
         # Transform response to entity rows

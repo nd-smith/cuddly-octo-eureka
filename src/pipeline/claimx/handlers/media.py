@@ -305,12 +305,16 @@ class MediaHandler(EventHandler):
 
         if len(media_ids) <= BATCH_THRESHOLD:
             numeric_ids = [mid for m in media_ids if m and (mid := safe_int(m)) is not None]
-            response = await self.client.get_project_media(
-                project_id,
-                media_ids=numeric_ids,
+            response = await self._call_api_with_retry(
+                lambda: self.client.get_project_media(
+                    project_id,
+                    media_ids=numeric_ids,
+                )
             )
         else:
-            response = await self.client.get_project_media(project_id)
+            response = await self._call_api_with_retry(
+                lambda: self.client.get_project_media(project_id)
+            )
 
         media_list = self._normalize_media_response(response)
 

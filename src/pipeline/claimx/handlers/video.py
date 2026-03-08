@@ -47,7 +47,9 @@ class VideoCollabHandler(EventHandler):
 
         try:
             # 1. Fetch video collaboration report
-            response = await self.client.get_video_collaboration(int(event.project_id))
+            response = await self._call_api_with_retry(
+                lambda: self.client.get_video_collaboration(int(event.project_id))
+            )
 
             collab_data = self._extract_collab_data(response, event.project_id)
 

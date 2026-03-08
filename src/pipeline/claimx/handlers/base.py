@@ -1,5 +1,6 @@
 """Base handler classes and registry for ClaimX event processing."""
 
+import asyncio
 import logging
 from abc import ABC, abstractmethod
 from collections import defaultdict
@@ -8,11 +9,16 @@ from datetime import UTC, datetime
 from typing import (
     TYPE_CHECKING,
     Any,
+    Awaitable,
+    Callable,
     Optional,
+    TypeVar,
 )
 
 from core.types import ErrorCategory
-from pipeline.claimx.api_client import ClaimXApiClient
+from pipeline.claimx.api_client import ClaimXApiClient, ClaimXApiError
+
+T = TypeVar("T")
 from pipeline.claimx.schemas.entities import EntityRowsMessage
 from pipeline.claimx.schemas.events import ClaimXEventMessage
 from pipeline.common.logging import extract_log_context
@@ -203,6 +209,33 @@ class EventHandler(ABC):
             project_id,
             trace_id=trace_id,
         )
+
+    async def _call_api_with_retry(
+        self,
+        coro_factory: Callable[[], Awaitable[T]],
+        *,
+        max_attempts: int = 3,
+        base_delay: float = 1.0,
+    ) -> T:
+        """Retry transient API errors locally before escalating to pipeline retry."""
+        for attempt in range(max_attempts):
+            try:
+                return await coro_factory()
+            except ClaimXApiError as e:
+                if not e.is_retryable or attempt == max_attempts - 1:
+                    raise
+                delay = base_delay * (2 ** attempt)
+                logger.info(
+                    "Retrying transient API error",
+                    extra={
+                        "attempt": attempt + 1,
+                        "max_attempts": max_attempts,
+                        "delay": delay,
+                        "status_code": e.status_code,
+                    },
+                )
+                await asyncio.sleep(delay)
+        raise RuntimeError("unreachable")  # satisfy type checker
 
     @abstractmethod
     async def handle_event(self, event: ClaimXEventMessage) -> EnrichmentResult:

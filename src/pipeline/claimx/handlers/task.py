@@ -97,13 +97,17 @@ class TaskHandler(EventHandler):
         project_id: int,
     ) -> None:
         """Fetch project/media data and produce a ClaimXTaskEvent to EventHub."""
-        project_response = await self.client.get_project(project_id)
+        project_response = await self._call_api_with_retry(
+            lambda: self.client.get_project(project_id)
+        )
 
         report_id = safe_int(task_response.get("pdfProjectMediaId"))
         media_response = None
         if report_id is not None:
-            media_response = await self.client.get_project_media(
-                project_id, media_ids=[report_id],
+            media_response = await self._call_api_with_retry(
+                lambda: self.client.get_project_media(
+                    project_id, media_ids=[report_id],
+                )
             )
 
         task_event_data = transformers.build_task_event(
@@ -156,7 +160,9 @@ class TaskHandler(EventHandler):
             )
 
         try:
-            response = await self.client.get_custom_task(assignment_id)
+            response = await self._call_api_with_retry(
+                lambda: self.client.get_custom_task(assignment_id)
+            )
 
             resp_project_id = safe_int(response.get("projectId"))
             project_id = resp_project_id if resp_project_id is not None else int(event.project_id)
