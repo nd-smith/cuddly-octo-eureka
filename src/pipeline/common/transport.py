@@ -444,6 +444,12 @@ async def _setup_eventhub_consumer_args(
                 f"domain={domain}, worker={worker_name}, eventhub={eventhub_name}"
             )
     except Exception as e:
+        env = os.getenv("ENVIRONMENT", "").lower()
+        if env == "production":
+            raise RuntimeError(
+                f"Checkpoint store initialization failed in production: {e}. "
+                f"In-memory fallback is not safe for production deployments."
+            ) from e
         logger.error(
             f"Failed to initialize checkpoint store for Event Hub {consumer_label}: "
             f"domain={domain}, worker={worker_name}, eventhub={eventhub_name}. "
