@@ -366,8 +366,8 @@ class ClaimXEntityWriter:
 
         return counts, failed_tables
 
-    # Tables that use append-only writes (no merge)
-    _APPEND_ONLY_TABLES = frozenset({"contacts", "media"})
+    # All tables now use merge for idempotency (prevents duplicates on reprocessing)
+    _APPEND_ONLY_TABLES: frozenset[str] = frozenset()
 
     def _ensure_timestamp_columns(self, df: pl.DataFrame) -> pl.DataFrame:
         """Ensure created_at and updated_at columns have non-null values."""

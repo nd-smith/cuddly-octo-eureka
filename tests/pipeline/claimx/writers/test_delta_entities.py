@@ -131,10 +131,10 @@ class TestClaimXEntityWriterWriteAll:
         counts, failed_tables = await claimx_entity_writer.write_all(entity_rows)
 
         assert counts.get("contacts") == 1
-        # Verify append was called for contacts (not merge)
+        # Verify merge was called for contacts (idempotent writes)
         contacts_writer = claimx_entity_writer._writers["contacts"]
-        assert contacts_writer.append_call_count == 1
-        assert contacts_writer.merge_call_count == 0
+        assert contacts_writer.merge_call_count == 1
+        assert contacts_writer.append_call_count == 0
 
     @pytest.mark.asyncio
     async def test_write_all_media_only(self, claimx_entity_writer, sample_media_row):
@@ -144,10 +144,10 @@ class TestClaimXEntityWriterWriteAll:
         counts, failed_tables = await claimx_entity_writer.write_all(entity_rows)
 
         assert counts.get("media") == 1
-        # Verify append was called for media (not merge)
+        # Verify merge was called for media (idempotent writes)
         media_writer = claimx_entity_writer._writers["media"]
-        assert media_writer.append_call_count == 1
-        assert media_writer.merge_call_count == 0
+        assert media_writer.merge_call_count == 1
+        assert media_writer.append_call_count == 0
 
     @pytest.mark.asyncio
     async def test_write_all_tasks_only(self, claimx_entity_writer, sample_task_row):
@@ -602,9 +602,9 @@ async def test_claimx_entity_writer_integration():
         projects_mock = mock_writers["abfss://test/projects"]
         projects_mock._async_merge.assert_called_once()
 
-        # Verify append was called for contacts
+        # Verify merge was called for contacts (idempotent writes)
         contacts_mock = mock_writers["abfss://test/contacts"]
-        contacts_mock._async_append.assert_called_once()
+        contacts_mock._async_merge.assert_called_once()
 
 
 class TestClaimXEntityWriterFailedTables:
