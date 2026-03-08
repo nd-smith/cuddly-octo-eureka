@@ -109,12 +109,15 @@ def apply_ssl_dev_bypass() -> None:
     if not enabled:
         return
 
+    ALLOWED_ENVS = {"development", "local", "dev", "test"}
     env = os.getenv("ENVIRONMENT", "").lower()
     app_env = os.getenv("APP_ENV", "").lower()
-    if env == "production" or app_env == "production":
+    if env not in ALLOWED_ENVS and app_env not in ALLOWED_ENVS:
         logger.error(
-            "DISABLE_SSL_VERIFY is set but ENVIRONMENT or APP_ENV is 'production'. "
-            "Refusing to disable SSL verification in production."
+            "DISABLE_SSL_VERIFY is set but ENVIRONMENT=%s / APP_ENV=%s "
+            "is not a recognized development environment. "
+            "Refusing to disable SSL verification.",
+            env, app_env,
         )
         return
 
