@@ -146,7 +146,7 @@ def _reset_delta_process_pool() -> None:
                     proc.kill()
             pool.shutdown(wait=False, cancel_futures=True)
         except Exception:
-            pass
+            logging.getLogger(__name__).warning("Failed to cleanly reset process pool", exc_info=True)
 
 
 class BaseDeltaWriter:

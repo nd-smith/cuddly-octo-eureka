@@ -656,6 +656,7 @@ class ClaimXEventIngesterWorker:
                 logger.warning(
                     "Error persisting to blob storage (memory cache still updated)",
                     extra={"trace_id": trace_id, "error": str(e)},
+                    exc_info=True,
                 )
 
     # Prewarm cap: limit blob enumeration to avoid blocking startup
