@@ -179,12 +179,15 @@ class EventHubProducer:
                 f"partitions: {len(props.get('partition_ids', []))}"
             )
         except Exception as e:
+            _DEV_ENVS = {"development", "local", "dev", "test"}
             env = os.getenv("ENVIRONMENT", "").lower()
-            if env == "production":
+            app_env = os.getenv("APP_ENV", "").lower()
+            if env not in _DEV_ENVS and app_env not in _DEV_ENVS:
                 raise RuntimeError(
-                    f"Event Hub connectivity check failed in production for "
+                    f"Event Hub connectivity check failed (ENVIRONMENT={env!r}) for "
                     f"'{self.eventhub_name}': {e}. Refusing to start with "
-                    f"unverified connectivity."
+                    f"unverified connectivity. Set ENVIRONMENT to a dev value "
+                    f"({', '.join(sorted(_DEV_ENVS))}) to allow fallback."
                 ) from e
             logger.warning(
                 "Could not fetch Event Hub properties (non-fatal), "
