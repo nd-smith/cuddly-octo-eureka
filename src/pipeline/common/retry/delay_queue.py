@@ -101,6 +101,7 @@ class DelayQueue:
             }
 
             # Write atomically (write to temp file, then rename)
+            self._persistence_file.parent.mkdir(parents=True, exist_ok=True)
             temp_file = self._persistence_file.with_suffix(".tmp")
             with open(temp_file, "w") as f:
                 json.dump(data, f, indent=2)

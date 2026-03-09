@@ -269,14 +269,17 @@ class TestDelayQueuePersistence:
         data = json.loads(persistence_file.read_text())
         assert data["messages"][0]["message_key"] is None
 
-    def test_persist_handles_write_error(self, tmp_path):
-        """persist_to_disk logs error and does not raise on write failure."""
+    def test_persist_creates_parent_directory(self, tmp_path):
+        """persist_to_disk creates parent directories if they don't exist."""
         persistence_file = tmp_path / "nonexistent_dir" / "queue.json"
         queue = DelayQueue("verisk", persistence_file)
         queue.push(make_delayed_message())
 
-        # Should not raise even though directory does not exist
         queue.persist_to_disk()
+
+        assert persistence_file.exists()
+        data = json.loads(persistence_file.read_text())
+        assert len(data["messages"]) == 1
 
     def test_persistence_failure_continues_processing(self, tmp_path):
         """Disk write fails → logged warning, queue stays in memory, processing continues."""
