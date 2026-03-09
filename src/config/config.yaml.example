@@ -94,16 +94,6 @@ claimx:
     # Token loaded from CLAIMX_API_TOKEN env var
 
 # =============================================================================
-# PLUGINS - ITEL CABINET API
-# =============================================================================
-itel_cabinet:
-  api_base_url: ${ITEL_CABINET_API_BASE_URL}
-  api_token: ${ITEL_CABINET_API_TOKEN}
-  delta_forms_table: ${ITEL_DELTA_FORMS_TABLE}
-  delta_attachments_table: ${ITEL_DELTA_ATTACHMENTS_TABLE}
-  attachments_path: ${ITEL_ATTACHMENTS_PATH}
-
-# =============================================================================
 # TRANSPORT LAYER CONFIGURATION
 # =============================================================================
 # Select transport protocol: "eventhub" (default) or "kafka"
