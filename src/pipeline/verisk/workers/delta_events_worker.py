@@ -465,7 +465,13 @@ class DeltaEventsWorker:
                 "batch_id": batch_id,
                 "batch_size": batch_size,
                 "error_category": category_str,
+                "error": str(error)[:500],
+                "error_type": type(error).__name__,
+                "table": "xact_events",
+                "trace_id": trace_ids[0] if trace_ids else None,
                 "trace_ids": trace_ids,
+                "retry_count": 0,
+                "records_failed": batch_size,
             },
         )
         try:
@@ -480,7 +486,14 @@ class DeltaEventsWorker:
             logger.error(
                 "Failed to route batch to retry handler, events will be "
                 "redelivered from last checkpoint",
-                extra={"batch_id": batch_id, "batch_size": batch_size},
+                extra={
+                    "batch_id": batch_id,
+                    "batch_size": batch_size,
+                    "error_category": category_str,
+                    "table": "xact_events",
+                    "trace_id": trace_ids[0] if trace_ids else None,
+                    "records_failed": batch_size,
+                },
                 exc_info=True,
             )
 
@@ -522,9 +535,14 @@ class DeltaEventsWorker:
                 self._last_error_category = error_category
 
                 trace_ids = []
+                event_types = set()
                 for evt in batch[:10]:
-                    if evt.get("traceId") or evt.get("trace_id"):
-                        trace_ids.append(evt.get("traceId") or evt.get("trace_id"))
+                    tid = evt.get("traceId") or evt.get("trace_id")
+                    if tid:
+                        trace_ids.append(tid)
+                    etype = evt.get("type") or evt.get("event_type")
+                    if etype:
+                        event_types.add(etype)
 
                 span.set_tag("write.success", False)
                 span.set_tag("error.category", error_category.value)
@@ -536,10 +554,17 @@ class DeltaEventsWorker:
                     "Delta write error - classified for routing",
                     error_category=error_category.value,
                     exc=e,
+                    error=str(e)[:500],
+                    error_type=type(e).__name__,
                     batch_id=batch_id,
                     batch_size=batch_size,
-                    error_type=type(e).__name__,
+                    table="xact_events",
+                    trace_id=trace_ids[0] if trace_ids else None,
                     trace_ids=trace_ids,
+                    event_type=", ".join(sorted(event_types)) if event_types else None,
+                    retry_count=0,
+                    records_failed=batch_size,
+                    rows_written=0,
                 )
                 record_delta_write(
                     table="xact_events",
