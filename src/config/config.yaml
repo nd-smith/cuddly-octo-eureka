@@ -98,7 +98,6 @@ claimx:
 # =============================================================================
 itel_cabinet:
   api_base_url: ${ITEL_CABINET_API_BASE_URL}
-  api_token: ${ITEL_CABINET_API_TOKEN}
   delta_forms_table: ${ITEL_DELTA_FORMS_TABLE}
   delta_attachments_table: ${ITEL_DELTA_ATTACHMENTS_TABLE}
   attachments_path: ${ITEL_ATTACHMENTS_PATH}
