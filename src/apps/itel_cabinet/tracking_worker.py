@@ -120,10 +120,13 @@ class ItelCabinetTrackingWorker:
         """Process a single message from the transport layer."""
         start_time = time.perf_counter()
         topic = self.transport_config["input_topic"]
+        event_id = ""
+        assignment_id = ""
 
         try:
             message_data = json.loads(record.value.decode("utf-8"))
             event_id = message_data.get("eventId", message_data.get("event_id", ""))
+            assignment_id = message_data.get("assignmentId", message_data.get("assignment_id", ""))
             set_log_context(trace_id=event_id)
 
             result = await self.pipeline.process(message_data)
@@ -158,7 +161,11 @@ class ItelCabinetTrackingWorker:
             logger.error(
                 "Validation error: %s",
                 e,
-                extra={"offset": getattr(record, "offset", "unknown")},
+                extra={
+                    "event_id": event_id,
+                    "assignment_id": assignment_id,
+                    "offset": getattr(record, "offset", "unknown"),
+                },
             )
 
         except Exception as e:
@@ -173,7 +180,12 @@ class ItelCabinetTrackingWorker:
             logger.exception(
                 "Failed to process message: %s",
                 e,
-                extra={"offset": getattr(record, "offset", "unknown")},
+                extra={
+                    "event_id": event_id,
+                    "assignment_id": assignment_id,
+                    "offset": getattr(record, "offset", "unknown"),
+                    "partition": getattr(record, "partition", "unknown"),
+                },
             )
             raise
 
