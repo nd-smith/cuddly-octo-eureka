@@ -71,6 +71,7 @@ EVENTHUB_ERROR_MAPPINGS = {
         "ConnectError",
         "OperationTimeoutError",
         "AMQPConnectionError",
+        "ServerDisconnectedError",
     ],
     # Auth errors (credential refresh needed)
     "auth": [
@@ -149,7 +150,7 @@ def _classify_by_string_fallback(
     if "timeout" in error_str:
         return TimeoutError(f"{label} timeout: {error}", cause=error, context=ctx)
 
-    connection_markers = ["connection", "broker", "network"]
+    connection_markers = ["connection", "broker", "network", "disconnect"]
     connection_markers.append("node not ready" if service_name == "consumer" else "leader")
 
     if any(m in error_str for m in connection_markers):

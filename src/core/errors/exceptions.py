@@ -328,6 +328,7 @@ _EXCEPTION_MARKER_RULES: list[tuple[tuple[str, ...], ErrorCategory]] = [
             "connectionerror", "connection refused", "connection reset",
             "connection aborted", "no route to host", "network unreachable",
             "name resolution", "dns", "socket", "broken pipe",
+            "disconnect", "serverdisconnectederror",
         ),
         ErrorCategory.TRANSIENT,
     ),
