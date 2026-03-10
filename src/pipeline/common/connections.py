@@ -9,6 +9,7 @@ retry policies, and lifecycle management.
 import asyncio
 import json
 import logging
+import time
 import warnings
 from dataclasses import dataclass, field
 from enum import Enum
@@ -204,6 +205,34 @@ class ConnectionManager:
         This method is decorated with retry logic. On 5xx error or connection
         error, raises TransientError to trigger retry.
         """
+        # Compute payload size for diagnostics
+        payload_size = 0
+        if json is not None:
+            try:
+                payload_size = len(__import__("json").dumps(json))
+            except Exception:
+                pass
+
+        # Sanitize headers for logging (redact auth values)
+        safe_headers = {
+            k: (v[:12] + "..." if k.lower() in ("authorization", "ocp-apim-subscription-key") else v)
+            for k, v in request_headers.items()
+        }
+
+        logger.info(
+            "HTTP request starting: %s %s",
+            method,
+            url,
+            extra={
+                "method": method,
+                "url": url,
+                "payload_bytes": payload_size,
+                "timeout_total": timeout,
+                "headers_sent": safe_headers,
+            },
+        )
+
+        t_start = time.monotonic()
         try:
             async with self._session.request(
                 method=method,
@@ -218,7 +247,21 @@ class ConnectionManager:
                     sock_read=timeout,
                 ),
             ) as response:
-                logger.debug(f"Response {response.status} from {method} {url}")
+                elapsed_ms = (time.monotonic() - t_start) * 1000
+                logger.info(
+                    "HTTP response received: %s %s -> %s (%.0fms)",
+                    method,
+                    url,
+                    response.status,
+                    elapsed_ms,
+                    extra={
+                        "method": method,
+                        "url": url,
+                        "status": response.status,
+                        "elapsed_ms": round(elapsed_ms, 1),
+                        "response_headers": dict(response.headers),
+                    },
+                )
 
                 # Classify 5xx errors as transient for retry
                 if response.status >= 500:
@@ -235,28 +278,63 @@ class ConnectionManager:
                 await response.read()
                 return response
         except aiohttp.ServerDisconnectedError as e:
-            logger.warning(
-                "Server disconnected during %s %s (request may have been "
-                "received by the server - check for duplicates on retry)",
+            elapsed_ms = (time.monotonic() - t_start) * 1000
+            # e.message may contain a RawResponseMessage with partial headers
+            server_msg = getattr(e, "message", None)
+            logger.error(
+                "SERVER DISCONNECT during %s %s after %.0fms — "
+                "payload_bytes=%d server_message=%r exception=%s",
                 method,
                 url,
+                elapsed_ms,
+                payload_size,
+                server_msg,
+                repr(e),
+                extra={
+                    "method": method,
+                    "url": url,
+                    "elapsed_ms": round(elapsed_ms, 1),
+                    "payload_bytes": payload_size,
+                    "server_disconnect_message": repr(server_msg),
+                    "exception_type": type(e).__name__,
+                    "exception_repr": repr(e),
+                    "headers_sent": safe_headers,
+                },
             )
             raise TransientError(
-                f"Server disconnected during {method} {url}",
+                f"Server disconnected during {method} {url} after {elapsed_ms:.0f}ms",
                 cause=e,
-                context={"method": method, "url": url, "phase": "response_read"},
+                context={
+                    "method": method,
+                    "url": url,
+                    "phase": "request",
+                    "elapsed_ms": round(elapsed_ms, 1),
+                    "payload_bytes": payload_size,
+                    "server_message": repr(server_msg),
+                },
             ) from e
         except aiohttp.ClientConnectionError as e:
-            logger.warning(
-                "Connection error during %s %s: %s",
+            elapsed_ms = (time.monotonic() - t_start) * 1000
+            logger.error(
+                "CONNECTION ERROR during %s %s after %.0fms: %s",
                 method,
                 url,
-                str(e)[:200],
+                elapsed_ms,
+                repr(e),
+                extra={
+                    "method": method,
+                    "url": url,
+                    "elapsed_ms": round(elapsed_ms, 1),
+                    "payload_bytes": payload_size,
+                    "exception_type": type(e).__name__,
+                    "exception_repr": repr(e),
+                    "headers_sent": safe_headers,
+                },
             )
             raise TransientError(
                 f"Connection error during {method} {url}: {e}",
                 cause=e,
-                context={"method": method, "url": url},
+                context={"method": method, "url": url, "elapsed_ms": round(elapsed_ms, 1)},
             ) from e
 
     async def start(self) -> None:
