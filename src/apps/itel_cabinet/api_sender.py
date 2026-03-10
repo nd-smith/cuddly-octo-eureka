@@ -88,6 +88,7 @@ class ItelApiSender:
         simulation_config: Any | None = None,
         onelake_results_path: str | None = None,
         output_config: dict | None = None,
+        debug_output_path: str | None = None,
     ):
         self.api_config = api_config
         self.connections = connection_manager
@@ -106,7 +107,7 @@ class ItelApiSender:
         )
 
         # Debug output dir
-        self.debug_output_dir = Path("/tmp/itel_cabinet_api_debug")
+        self.debug_output_dir = Path(debug_output_path or "/tmp/itel_cabinet_api_debug")
         self.debug_output_dir.mkdir(parents=True, exist_ok=True)
 
         # Simulation output dir
@@ -679,6 +680,13 @@ async def build_api_sender(
     except ImportError:
         pass
 
+    # Load debug output path
+    debug_output_path = None
+    raw_debug_path = api_worker_config.get("debug_output_path")
+    if raw_debug_path:
+        expanded = expand_env_var_string(raw_debug_path).strip()
+        debug_output_path = expanded if expanded and "${" not in expanded else None
+
     # Load OneLake results path
     onelake_config = api_worker_config.get("onelake", {})
     onelake_results_path = None
@@ -700,6 +708,7 @@ async def build_api_sender(
         simulation_config=simulation_config,
         onelake_results_path=onelake_results_path,
         output_config=output_config,
+        debug_output_path=debug_output_path,
     )
 
     return sender
