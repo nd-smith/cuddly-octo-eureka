@@ -187,7 +187,24 @@ class ItelApiSender:
             await self._write_simulation_payload(api_payload, payload)
             return True
 
-        status, response_body = await self._send_to_api(api_payload)
+        try:
+            status, response_body = await self._send_to_api(api_payload)
+        except Exception as e:
+            logger.error(
+                "Connection-level error sending to iTel API — publishing error event",
+                extra={
+                    "assignment_id": api_payload.get("integration_test_id", "unknown"),
+                    "error": str(e)[:300],
+                },
+            )
+            await self._handle_api_result(
+                status=0,
+                response={"error": "connection_error", "detail": str(e)[:500]},
+                api_payload=api_payload,
+                original_payload=payload,
+            )
+            raise
+
         api_error = await self._handle_api_result(status, response_body, api_payload, payload)
         return not api_error
 
