@@ -272,8 +272,7 @@ class ConnectionManager:
             limit=self._connector_limit,
             limit_per_host=self._connector_limit_per_host,
             enable_cleanup_closed=True,
-            force_close=False,
-            keepalive_timeout=30,
+            force_close=True,
         )
 
         self._session = aiohttp.ClientSession(
