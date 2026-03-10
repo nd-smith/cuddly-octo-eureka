@@ -16,7 +16,7 @@ from typing import Any
 
 import aiohttp
 
-from core.errors.exceptions import PermanentError, TransientError
+from core.errors.exceptions import TransientError
 from core.resilience.retry import RetryConfig, with_retry_async
 
 logger = logging.getLogger(__name__)
@@ -203,76 +203,14 @@ class ConnectionManager:
 
         This method is decorated with retry logic. On 5xx error, raises
         TransientError to trigger retry.
-
-        On ServerDisconnectedError for idempotent methods (GET, HEAD, PUT,
-        DELETE, OPTIONS), a single immediate retry is attempted on a fresh
-        connection — the stale socket is already evicted by aiohttp.
-
-        For non-idempotent methods (POST, PATCH) the error is raised as a
-        PermanentError so the outer retry loop does NOT re-send the request,
-        since the server may have already processed it.
         """
-        try:
-            return await self._do_request(
-                method=method,
-                url=url,
-                json=json,
-                data=data,
-                params=params,
-                headers=request_headers,
-                timeout=timeout,
-            )
-        except aiohttp.ServerDisconnectedError as exc:
-            is_idempotent = method.upper() in ("GET", "HEAD", "PUT", "DELETE", "OPTIONS")
-
-            if not is_idempotent:
-                logger.warning(
-                    "Server disconnected on non-idempotent %s %s — "
-                    "not retrying (server may have processed the request)",
-                    method,
-                    url,
-                )
-                raise PermanentError(
-                    f"Server disconnected during {method} {url}; "
-                    f"request may have been processed by the server",
-                    context={"method": method, "url": url},
-                ) from exc
-
-            logger.warning(
-                "Server disconnected (stale connection), retrying once with fresh connection: %s %s",
-                method,
-                url,
-            )
-            # The failed connection is already removed from the pool by aiohttp,
-            # so the next request will open a fresh connection.
-            return await self._do_request(
-                method=method,
-                url=url,
-                json=json,
-                data=data,
-                params=params,
-                headers=request_headers,
-                timeout=timeout,
-            )
-
-    async def _do_request(
-        self,
-        method: str,
-        url: str,
-        headers: dict[str, str],
-        timeout: int,
-        json: dict[str, Any] | None,
-        data: Any | None,
-        params: dict[str, Any] | None,
-    ) -> aiohttp.ClientResponse:
-        """Execute a single HTTP request and handle the response."""
         async with self._session.request(
             method=method,
             url=url,
             json=json,
             data=data,
             params=params,
-            headers=headers,
+            headers=request_headers,
             timeout=aiohttp.ClientTimeout(total=timeout),
         ) as response:
             logger.debug(f"Response {response.status} from {method} {url}")
@@ -305,6 +243,7 @@ class ConnectionManager:
             limit=self._connector_limit,
             limit_per_host=self._connector_limit_per_host,
             enable_cleanup_closed=True,
+            force_close=True,
         )
 
         self._session = aiohttp.ClientSession(
