@@ -436,7 +436,9 @@ class ItelApiSender:
             )
         else:
             logger.info(
-                "iTel API responded",
+                "iTel API responded: status=%s assignment=%s",
+                status,
+                assignment_id,
                 extra={
                     "status": status,
                     "assignment_id": assignment_id,

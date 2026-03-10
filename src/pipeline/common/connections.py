@@ -243,6 +243,7 @@ class ConnectionManager:
             limit=self._connector_limit,
             limit_per_host=self._connector_limit_per_host,
             enable_cleanup_closed=True,
+            force_close=True,
         )
 
         self._session = aiohttp.ClientSession(
@@ -424,7 +425,7 @@ class ConnectionManager:
             body = await response.json(content_type=None)
         except (json.JSONDecodeError, ValueError):
             text = await response.text()
-            body = {"raw_body": text}
+            body = {"raw_body": text} if text else {}
 
         return status, body
 
