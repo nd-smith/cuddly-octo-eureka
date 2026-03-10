@@ -201,34 +201,63 @@ class ConnectionManager:
         """
         Execute single HTTP request with error classification.
 
-        This method is decorated with retry logic. On 5xx error, raises
-        TransientError to trigger retry.
+        This method is decorated with retry logic. On 5xx error or connection
+        error, raises TransientError to trigger retry.
         """
-        async with self._session.request(
-            method=method,
-            url=url,
-            json=json,
-            data=data,
-            params=params,
-            headers=request_headers,
-            timeout=aiohttp.ClientTimeout(total=timeout),
-        ) as response:
-            logger.debug(f"Response {response.status} from {method} {url}")
+        try:
+            async with self._session.request(
+                method=method,
+                url=url,
+                json=json,
+                data=data,
+                params=params,
+                headers=request_headers,
+                timeout=aiohttp.ClientTimeout(
+                    total=timeout,
+                    sock_connect=min(timeout, 10),
+                    sock_read=timeout,
+                ),
+            ) as response:
+                logger.debug(f"Response {response.status} from {method} {url}")
 
-            # Classify 5xx errors as transient for retry
-            if response.status >= 500:
-                body = await response.text()
-                logger.warning(
-                    f"Server error {response.status} from {url}, will retry. Body: {body[:200]}"
-                )
-                raise TransientError(
-                    f"HTTP {response.status}: {body[:200]}",
-                    context={"status_code": response.status, "url": url},
-                )
+                # Classify 5xx errors as transient for retry
+                if response.status >= 500:
+                    body = await response.text()
+                    logger.warning(
+                        f"Server error {response.status} from {url}, will retry. Body: {body[:200]}"
+                    )
+                    raise TransientError(
+                        f"HTTP {response.status}: {body[:200]}",
+                        context={"status_code": response.status, "url": url},
+                    )
 
-            # Read body before context manager closes
-            await response.read()
-            return response
+                # Read body before context manager closes
+                await response.read()
+                return response
+        except aiohttp.ServerDisconnectedError as e:
+            logger.warning(
+                "Server disconnected during %s %s (request may have been "
+                "received by the server - check for duplicates on retry)",
+                method,
+                url,
+            )
+            raise TransientError(
+                f"Server disconnected during {method} {url}",
+                cause=e,
+                context={"method": method, "url": url, "phase": "response_read"},
+            ) from e
+        except aiohttp.ClientConnectionError as e:
+            logger.warning(
+                "Connection error during %s %s: %s",
+                method,
+                url,
+                str(e)[:200],
+            )
+            raise TransientError(
+                f"Connection error during {method} {url}: {e}",
+                cause=e,
+                context={"method": method, "url": url},
+            ) from e
 
     async def start(self) -> None:
         """Initialize HTTP client session and OAuth2 providers.
@@ -243,7 +272,8 @@ class ConnectionManager:
             limit=self._connector_limit,
             limit_per_host=self._connector_limit_per_host,
             enable_cleanup_closed=True,
-            force_close=True,
+            force_close=False,
+            keepalive_timeout=30,
         )
 
         self._session = aiohttp.ClientSession(
