@@ -478,7 +478,7 @@ class ConnectionManager:
             body = await response.json(content_type=None)
         except (json.JSONDecodeError, ValueError):
             text = await response.text()
-            body = {"raw_body": text}
+            body = {"raw_body": text} if text else {}
 
         return status, body
 
