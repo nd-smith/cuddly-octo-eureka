@@ -71,6 +71,10 @@ workers:
       carrier_id: ${ITEL_CABINET_API_CARRIER_ID}
       subscription_id: ${ITEL_CABINET_API_SUBSCRIPTION_ID}
 
+    # Local debug output directory for API payloads
+    # All API requests/responses are written here as JSON for post-hoc inspection
+    debug_output_path: ${ITEL_API_DEBUG_OUTPUT_PATH:-/tmp/itel_cabinet_api_debug}
+
     # OneLake path for API result uploads
     # Files land at: {base}/success/{YYYY}/{MM}/{DD}/{assignment_id}_{ts}.json
     #            or: {base}/error/{YYYY}/{MM}/{DD}/{assignment_id}_{ts}.json
