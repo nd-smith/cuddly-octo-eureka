@@ -16,7 +16,7 @@ from typing import Any
 
 import aiohttp
 
-from core.errors.exceptions import TransientError
+from core.errors.exceptions import PermanentError, TransientError
 from core.resilience.retry import RetryConfig, with_retry_async
 
 logger = logging.getLogger(__name__)
@@ -203,14 +203,68 @@ class ConnectionManager:
 
         This method is decorated with retry logic. On 5xx error, raises
         TransientError to trigger retry.
+
+        On ServerDisconnectedError (stale keep-alive connection), a single
+        immediate retry is attempted after closing the dead connection. This
+        avoids propagating the error up to the caller's retry loop which
+        would re-send the full request (risking duplicates for POST).
         """
+        try:
+            return await self._do_request(
+                method=method,
+                url=url,
+                json=json,
+                data=data,
+                params=params,
+                headers=request_headers,
+                timeout=timeout,
+            )
+        except aiohttp.ServerDisconnectedError:
+            logger.warning(
+                "Server disconnected (stale connection), retrying once with fresh connection: %s %s",
+                method,
+                url,
+            )
+            # The failed connection is already removed from the pool by aiohttp,
+            # so the next request will open a fresh connection.
+            try:
+                return await self._do_request(
+                    method=method,
+                    url=url,
+                    json=json,
+                    data=data,
+                    params=params,
+                    headers=request_headers,
+                    timeout=timeout,
+                )
+            except aiohttp.ServerDisconnectedError as retry_err:
+                # Two consecutive disconnects — stop retrying to avoid
+                # duplicate POSTs from the outer retry loop. The server may
+                # have already processed the request.
+                raise PermanentError(
+                    f"Server disconnected twice for {method} {url}, not retrying further "
+                    f"to avoid duplicate submissions",
+                    context={"method": method, "url": url},
+                ) from retry_err
+
+    async def _do_request(
+        self,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        timeout: int,
+        json: dict[str, Any] | None,
+        data: Any | None,
+        params: dict[str, Any] | None,
+    ) -> aiohttp.ClientResponse:
+        """Execute a single HTTP request and handle the response."""
         async with self._session.request(
             method=method,
             url=url,
             json=json,
             data=data,
             params=params,
-            headers=request_headers,
+            headers=headers,
             timeout=aiohttp.ClientTimeout(total=timeout),
         ) as response:
             logger.debug(f"Response {response.status} from {method} {url}")

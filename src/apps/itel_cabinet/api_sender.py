@@ -187,7 +187,29 @@ class ItelApiSender:
             await self._write_simulation_payload(api_payload, payload)
             return True
 
-        status, response_body = await self._send_to_api(api_payload)
+        try:
+            status, response_body = await self._send_to_api(api_payload)
+        except Exception as e:
+            # Connection-level failure (e.g. ServerDisconnectedError after retries).
+            # The request may have been received by the server even though we never
+            # got a response.  Record the failure so it shows up in the error topic
+            # with full context instead of silently disappearing.
+            logger.error(
+                "Connection-level failure sending to iTel API: %s",
+                e,
+                extra={
+                    "assignment_id": api_payload.get("integration_test_id", "unknown"),
+                    "event_id": payload.get("event_id", ""),
+                    "error_type": type(e).__name__,
+                },
+            )
+            await self._handle_api_result(
+                status=0,
+                response={"error": f"Connection failure: {type(e).__name__}: {e}"},
+                api_payload=api_payload,
+                original_payload=payload,
+            )
+            return False
         api_error = await self._handle_api_result(status, response_body, api_payload, payload)
         return not api_error
 
