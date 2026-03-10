@@ -424,14 +424,32 @@ class ItelApiSender:
         connection_name = self.api_config["connection"]
         conn_config = self.connections.get_connection(connection_name)
 
-        logger.info(
-            "Sending to iTel API",
-            extra={
-                "endpoint": conn_config.endpoint,
-                "method": conn_config.method,
-                "assignment_id": assignment_id,
-            },
-        )
+        # Diagnostic: log serialized payload details for disconnect debugging
+        try:
+            serialized = json.dumps(api_payload, default=str)
+            payload_bytes = len(serialized.encode("utf-8"))
+            image_count = len(api_payload.get("images", []))
+            image_urls = [img.get("url", "")[:80] for img in api_payload.get("images", [])]
+            has_nulls = [k for k, v in api_payload.items() if v is None]
+            logger.info(
+                "iTel API payload diagnostics: assignment=%s bytes=%d images=%d null_fields=%s",
+                assignment_id,
+                payload_bytes,
+                image_count,
+                has_nulls,
+                extra={
+                    "assignment_id": assignment_id,
+                    "payload_bytes": payload_bytes,
+                    "image_count": image_count,
+                    "image_urls": image_urls,
+                    "null_top_level_fields": has_nulls,
+                    "claim_number": api_payload.get("claim_number"),
+                    "endpoint": conn_config.endpoint,
+                    "method": conn_config.method,
+                },
+            )
+        except Exception:
+            logger.warning("Failed to compute payload diagnostics", exc_info=True)
 
         status, response = await self.connections.request_json(
             connection_name=connection_name,
