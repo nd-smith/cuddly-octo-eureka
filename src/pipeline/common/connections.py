@@ -204,10 +204,13 @@ class ConnectionManager:
         This method is decorated with retry logic. On 5xx error, raises
         TransientError to trigger retry.
 
-        On ServerDisconnectedError (stale keep-alive connection), a single
-        immediate retry is attempted after closing the dead connection. This
-        avoids propagating the error up to the caller's retry loop which
-        would re-send the full request (risking duplicates for POST).
+        On ServerDisconnectedError for idempotent methods (GET, HEAD, PUT,
+        DELETE, OPTIONS), a single immediate retry is attempted on a fresh
+        connection — the stale socket is already evicted by aiohttp.
+
+        For non-idempotent methods (POST, PATCH) the error is raised as a
+        PermanentError so the outer retry loop does NOT re-send the request,
+        since the server may have already processed it.
         """
         try:
             return await self._do_request(
@@ -219,7 +222,22 @@ class ConnectionManager:
                 headers=request_headers,
                 timeout=timeout,
             )
-        except aiohttp.ServerDisconnectedError:
+        except aiohttp.ServerDisconnectedError as exc:
+            is_idempotent = method.upper() in ("GET", "HEAD", "PUT", "DELETE", "OPTIONS")
+
+            if not is_idempotent:
+                logger.warning(
+                    "Server disconnected on non-idempotent %s %s — "
+                    "not retrying (server may have processed the request)",
+                    method,
+                    url,
+                )
+                raise PermanentError(
+                    f"Server disconnected during {method} {url}; "
+                    f"request may have been processed by the server",
+                    context={"method": method, "url": url},
+                ) from exc
+
             logger.warning(
                 "Server disconnected (stale connection), retrying once with fresh connection: %s %s",
                 method,
@@ -227,25 +245,15 @@ class ConnectionManager:
             )
             # The failed connection is already removed from the pool by aiohttp,
             # so the next request will open a fresh connection.
-            try:
-                return await self._do_request(
-                    method=method,
-                    url=url,
-                    json=json,
-                    data=data,
-                    params=params,
-                    headers=request_headers,
-                    timeout=timeout,
-                )
-            except aiohttp.ServerDisconnectedError as retry_err:
-                # Two consecutive disconnects — stop retrying to avoid
-                # duplicate POSTs from the outer retry loop. The server may
-                # have already processed the request.
-                raise PermanentError(
-                    f"Server disconnected twice for {method} {url}, not retrying further "
-                    f"to avoid duplicate submissions",
-                    context={"method": method, "url": url},
-                ) from retry_err
+            return await self._do_request(
+                method=method,
+                url=url,
+                json=json,
+                data=data,
+                params=params,
+                headers=request_headers,
+                timeout=timeout,
+            )
 
     async def _do_request(
         self,

@@ -19,7 +19,10 @@ from typing import Any
 
 import orjson
 
+import aiohttp
+
 from config.config import MessageConfig, expand_env_var_string
+from core.errors.exceptions import PermanentError
 from pipeline.common.connections import ConnectionManager, is_http_error
 from pipeline.common.transport import create_producer
 from pipeline.common.config_loader import load_connections, load_yaml_config
@@ -189,11 +192,32 @@ class ItelApiSender:
 
         try:
             status, response_body = await self._send_to_api(api_payload)
+        except (aiohttp.ServerDisconnectedError, PermanentError) as e:
+            # The POST was sent but the connection dropped before we could
+            # read the response.  The server confirmed (via the recipient)
+            # that these requests are processed and return 201, so treat
+            # the disconnect as a probable success to avoid false-negative
+            # error alerts and unnecessary reprocessing.
+            assignment_id = api_payload.get("integration_test_id", "unknown")
+            logger.warning(
+                "Server disconnected after POST — treating as probable success: %s",
+                e,
+                extra={
+                    "assignment_id": assignment_id,
+                    "event_id": payload.get("event_id", ""),
+                    "error_type": type(e).__name__,
+                },
+            )
+            await self._handle_api_result(
+                status=201,
+                response={"inferred": True, "reason": "server_disconnected"},
+                api_payload=api_payload,
+                original_payload=payload,
+            )
+            return True
         except Exception as e:
-            # Connection-level failure (e.g. ServerDisconnectedError after retries).
-            # The request may have been received by the server even though we never
-            # got a response.  Record the failure so it shows up in the error topic
-            # with full context instead of silently disappearing.
+            # Non-disconnect connection failure (DNS, timeout, auth, etc.).
+            # The request may not have reached the server at all.
             logger.error(
                 "Connection-level failure sending to iTel API: %s",
                 e,
