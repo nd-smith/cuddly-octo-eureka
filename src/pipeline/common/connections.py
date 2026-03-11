@@ -17,7 +17,7 @@ from typing import Any
 
 import aiohttp
 
-from core.errors.exceptions import TransientError
+from core.errors.exceptions import PermanentError, TransientError
 from core.resilience.retry import RetryConfig, with_retry_async
 
 logger = logging.getLogger(__name__)
@@ -281,13 +281,22 @@ class ConnectionManager:
             elapsed_ms = (time.monotonic() - t_start) * 1000
             # e.message may contain a RawResponseMessage with partial headers
             server_msg = getattr(e, "message", None)
+
+            # Extract HTTP status code from partial response if available.
+            # When the server sends headers (e.g. "201 Created") but drops the
+            # connection before the body is fully transmitted, aiohttp stores a
+            # RawResponseMessage on the exception.  The status code tells us
+            # whether the server already processed the request.
+            partial_status = getattr(server_msg, "code", None)
+
             logger.error(
                 "SERVER DISCONNECT during %s %s after %.0fms — "
-                "payload_bytes=%d server_message=%r exception=%s",
+                "payload_bytes=%d partial_status=%s server_message=%r exception=%s",
                 method,
                 url,
                 elapsed_ms,
                 payload_size,
+                partial_status,
                 server_msg,
                 repr(e),
                 extra={
@@ -295,23 +304,52 @@ class ConnectionManager:
                     "url": url,
                     "elapsed_ms": round(elapsed_ms, 1),
                     "payload_bytes": payload_size,
+                    "partial_status": partial_status,
                     "server_disconnect_message": repr(server_msg),
                     "exception_type": type(e).__name__,
                     "exception_repr": repr(e),
                     "headers_sent": safe_headers,
                 },
             )
+
+            disconnect_context = {
+                "method": method,
+                "url": url,
+                "phase": "request",
+                "elapsed_ms": round(elapsed_ms, 1),
+                "payload_bytes": payload_size,
+                "partial_status": partial_status,
+                "server_message": repr(server_msg),
+            }
+
+            # If the server sent back a 2xx or 4xx before disconnecting, the
+            # request was already processed — retrying would be wrong (and for
+            # non-idempotent POST requests causes duplicate-record errors).
+            if partial_status is not None and 200 <= partial_status < 500:
+                if 200 <= partial_status < 300:
+                    logger.warning(
+                        "Server disconnect with %d — request was accepted; "
+                        "treating as NON-retryable to avoid duplicate submission",
+                        partial_status,
+                    )
+                else:
+                    logger.warning(
+                        "Server disconnect with %d — client error; "
+                        "not retrying (would get same result)",
+                        partial_status,
+                    )
+                raise PermanentError(
+                    f"Server disconnected with status {partial_status} during "
+                    f"{method} {url} after {elapsed_ms:.0f}ms",
+                    cause=e,
+                    context=disconnect_context,
+                ) from e
+
+            # No partial status (or 5xx) — genuine transient failure, safe to retry
             raise TransientError(
                 f"Server disconnected during {method} {url} after {elapsed_ms:.0f}ms",
                 cause=e,
-                context={
-                    "method": method,
-                    "url": url,
-                    "phase": "request",
-                    "elapsed_ms": round(elapsed_ms, 1),
-                    "payload_bytes": payload_size,
-                    "server_message": repr(server_msg),
-                },
+                context=disconnect_context,
             ) from e
         except aiohttp.ClientConnectionError as e:
             elapsed_ms = (time.monotonic() - t_start) * 1000

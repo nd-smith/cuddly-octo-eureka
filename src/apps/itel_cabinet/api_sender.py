@@ -20,6 +20,7 @@ from typing import Any
 import orjson
 
 from config.config import MessageConfig, expand_env_var_string
+from core.errors.exceptions import PermanentError
 from pipeline.common.connections import ConnectionManager, is_http_error
 from pipeline.common.transport import create_producer
 from pipeline.common.config_loader import load_connections, load_yaml_config
@@ -190,6 +191,46 @@ class ItelApiSender:
 
         try:
             status, response_body = await self._send_to_api(api_payload)
+        except PermanentError as e:
+            # A PermanentError with a 2xx partial_status means the server
+            # accepted the request but dropped the connection before we could
+            # read the full response body.  Treat this as success rather than
+            # retrying and creating duplicates.
+            partial_status = e.context.get("partial_status")
+            if partial_status is not None and 200 <= partial_status < 300:
+                logger.warning(
+                    "Server disconnect with HTTP %d — treating as accepted "
+                    "(response body unavailable due to disconnect)",
+                    partial_status,
+                    extra={
+                        "assignment_id": api_payload.get("integration_test_id", "unknown"),
+                        "partial_status": partial_status,
+                    },
+                )
+                await self._handle_api_result(
+                    status=partial_status,
+                    response={"_disconnect": True, "detail": str(e)[:500]},
+                    api_payload=api_payload,
+                    original_payload=payload,
+                )
+                return True
+
+            # For 4xx disconnect or other permanent errors, record and re-raise
+            logger.error(
+                "Permanent error sending to iTel API — publishing error event",
+                extra={
+                    "assignment_id": api_payload.get("integration_test_id", "unknown"),
+                    "error": str(e)[:300],
+                    "partial_status": partial_status,
+                },
+            )
+            await self._handle_api_result(
+                status=partial_status or 0,
+                response={"error": "server_disconnect", "detail": str(e)[:500]},
+                api_payload=api_payload,
+                original_payload=payload,
+            )
+            raise
         except Exception as e:
             logger.error(
                 "Connection-level error sending to iTel API — publishing error event",
