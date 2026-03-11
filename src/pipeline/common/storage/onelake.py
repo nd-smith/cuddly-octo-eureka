@@ -115,6 +115,11 @@ class TCPKeepAliveAdapter(HTTPAdapter):
     - Start keepalive after 120s idle (before Azure 4-min timeout)
     - Send probe every 30s
     - Close connection after 8 failed probes (4 minutes total)
+
+    Platform notes:
+    - Linux: TCP_KEEPIDLE, TCP_KEEPINTVL, TCP_KEEPCNT
+    - macOS: TCP_KEEPALIVE (idle timeout only), TCP_KEEPINTVL, TCP_KEEPCNT
+    - Windows/other: SO_KEEPALIVE only (OS defaults for timing)
     """
 
     def init_poolmanager(self, *args, **kwargs):
@@ -122,9 +127,18 @@ class TCPKeepAliveAdapter(HTTPAdapter):
             kwargs["socket_options"] = []
 
         kwargs["socket_options"].append((socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1))
-        kwargs["socket_options"].append((socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 120))
-        kwargs["socket_options"].append((socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 30))
-        kwargs["socket_options"].append((socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 8))
+
+        if hasattr(socket, "TCP_KEEPIDLE"):
+            # Linux
+            kwargs["socket_options"].append((socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 120))
+        elif hasattr(socket, "TCP_KEEPALIVE"):
+            # macOS — TCP_KEEPALIVE is the macOS equivalent of TCP_KEEPIDLE
+            kwargs["socket_options"].append((socket.IPPROTO_TCP, socket.TCP_KEEPALIVE, 120))
+
+        if hasattr(socket, "TCP_KEEPINTVL"):
+            kwargs["socket_options"].append((socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 30))
+        if hasattr(socket, "TCP_KEEPCNT"):
+            kwargs["socket_options"].append((socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 8))
 
         return super().init_poolmanager(*args, **kwargs)
 
