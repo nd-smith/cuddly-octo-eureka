@@ -118,7 +118,7 @@ class EventIngesterWorker:
         # OrderedDict for O(1) LRU eviction: trace_id -> (event_id, timestamp)
         self._dedup_cache: OrderedDict[str, tuple[str, float]] = OrderedDict()
         self._dedup_cache_ttl_seconds = 86400  # 24 hours
-        self._dedup_cache_max_size = 200_000  # ~4MB memory for 200k entries
+        self._dedup_cache_max_size = 500_000  # ~10MB memory for 500k entries
 
         # Persistent blob storage (survives worker restarts)
         self._dedup_store: DedupStoreProtocol | None = None
@@ -126,6 +126,8 @@ class EventIngesterWorker:
         self._dedup_cleanup_task: asyncio.Task | None = None
         self._blob_write_tasks: set[asyncio.Task] = set()
         self._blob_semaphore = asyncio.Semaphore(100)
+        self._blob_reconciliation_task: asyncio.Task | None = None
+        self._pending_blob_checks: asyncio.Queue[list[tuple[str, str]]] = asyncio.Queue()
 
         # Health check server
         health_port = 8092
@@ -210,6 +212,12 @@ class EventIngesterWorker:
             if self._dedup_enabled:
                 self._dedup_cleanup_task = asyncio.create_task(self._periodic_dedup_cleanup())
 
+            # Start background blob reconciliation (checks blob store without blocking ingestion)
+            if self._dedup_store:
+                self._blob_reconciliation_task = asyncio.create_task(
+                    self._blob_reconciliation_loop()
+                )
+
             # Create and start batch consumer (uses transport factory)
             self.consumer = await create_batch_consumer(
                 config=self.consumer_config,
@@ -222,7 +230,7 @@ class EventIngesterWorker:
                 consumer_config=ConsumerConfig(
                     batch_size=self.REALTIME_BATCH_SIZE,
                     max_batch_size=self.BACKFILL_BATCH_SIZE,
-                    batch_timeout_ms=200,
+                    batch_timeout_ms=500,
                     prefetch=5000,
                 ),
                 health_server=self.health_server,
@@ -247,6 +255,7 @@ class EventIngesterWorker:
 
         await self._close_resource("stats logger", self._stop_stats_logger)
         await self._close_resource("dedup cleanup task", self._cancel_dedup_cleanup)
+        await self._close_resource("blob reconciliation task", self._cancel_blob_reconciliation)
         await self._close_resource("consumer", self._stop_consumer, clear="consumer")
         await self._close_resource("producer", self._stop_producer, clear="producer")
         await self._close_resource("dedup store", close_dedup_store)
@@ -284,6 +293,12 @@ class EventIngesterWorker:
             self._dedup_cleanup_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._dedup_cleanup_task
+
+    async def _cancel_blob_reconciliation(self) -> None:
+        if self._blob_reconciliation_task and not self._blob_reconciliation_task.done():
+            self._blob_reconciliation_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._blob_reconciliation_task
 
     async def _stop_consumer(self) -> None:
         if self.consumer:
@@ -433,13 +448,14 @@ class EventIngesterWorker:
 
             parsed_events.append((event, event_id))
 
+        # Blob dedup moved to background reconciliation to avoid blocking
+        # the hot path with HTTP round-trips. The memory cache (500k entries,
+        # 24h TTL) handles real-time dedup; blob storage is checked async and
+        # backfills the memory cache for cross-restart continuity.
         if self._dedup_store and parsed_events:
-            blob_duplicates = await self._check_blob_duplicates(parsed_events)
-            dedup_counts["blob"] = list(blob_duplicates)
-            parsed_events = [
-                (ev, eid) for ev, eid in parsed_events
-                if ev.trace_id not in blob_duplicates
-            ]
+            self._pending_blob_checks.put_nowait(
+                [(ev.trace_id, eid) for ev, eid in parsed_events]
+            )
 
         return parsed_events, dedup_counts, permanent_failures
 
@@ -677,6 +693,52 @@ class EventIngesterWorker:
                 self._cleanup_dedup_cache()
         except asyncio.CancelledError:
             pass
+
+    async def _blob_reconciliation_loop(self) -> None:
+        """Background loop: check blob storage for duplicates and backfill memory cache.
+
+        Runs continuously, draining batches of trace_ids queued by the hot path.
+        Duplicates found in blob storage are added to the memory cache so subsequent
+        redeliveries are caught by the fast memory check. This is eventually-consistent:
+        a duplicate may slip through once if it arrives before blob reconciliation
+        completes, but the enrichment pipeline is idempotent downstream.
+        """
+        try:
+            while True:
+                batch = await self._pending_blob_checks.get()
+                try:
+                    await self._reconcile_blob_batch(batch)
+                except Exception as e:
+                    logger.warning(
+                        "Blob reconciliation batch failed (memory cache unaffected)",
+                        extra={"batch_size": len(batch), "error": str(e)},
+                    )
+        except asyncio.CancelledError:
+            pass
+
+    async def _reconcile_blob_batch(
+        self, events: list[tuple[str, str]],
+    ) -> None:
+        """Check blob storage for a batch of trace_ids and backfill memory cache."""
+        async def _check_one(trace_id: str, event_id: str) -> None:
+            async with self._blob_semaphore:
+                try:
+                    is_dup, metadata = await self._dedup_store.check_duplicate(
+                        self._dedup_worker_name, trace_id, self._dedup_cache_ttl_seconds,
+                    )
+                    if is_dup and metadata:
+                        cached_event_id = metadata.get("event_id", event_id)
+                        timestamp = metadata.get("timestamp", time.time())
+                        self._dedup_cache[trace_id] = (cached_event_id, timestamp)
+                        self._dedup_cache.move_to_end(trace_id)
+                        self._dedup_blob_hits += 1
+                except Exception as e:
+                    logger.warning(
+                        "Blob reconciliation check failed for trace_id",
+                        extra={"trace_id": trace_id, "error": str(e)},
+                    )
+
+        await asyncio.gather(*(_check_one(tid, eid) for tid, eid in events))
 
     def _adjust_batch_size(self, batch_record_count: int) -> None:
         """Switch between backfill and realtime batch sizes based on batch fullness.
