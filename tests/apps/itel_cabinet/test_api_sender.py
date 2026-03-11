@@ -319,3 +319,71 @@ class TestSubmitDisconnectWith2xx:
             await sender.submit(_make_original_payload())
 
         sender._error_producer.send.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# Requests-lib experimental path (ITEL_USE_REQUESTS_LIB=true)
+# ---------------------------------------------------------------------------
+
+
+class TestSendToApiViaRequests:
+    async def test_requests_path_returns_status_and_body(self):
+        """The requests-based path should return (status, parsed_json)."""
+        sender = _make_submittable_sender()
+
+        conn_config = MagicMock()
+        conn_config.method = "POST"
+        conn_config.base_url = "https://api.itelinc.net"
+        conn_config.endpoint = "/v1/requests"
+        conn_config.timeout_seconds = 30
+
+        sender.connections._build_request_headers = AsyncMock(
+            return_value={"Authorization": "Bearer tok", "User-Agent": "test"}
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 201
+        mock_response.text = '{"id": "abc-123"}'
+        mock_response.json.return_value = {"id": "abc-123"}
+        mock_response.headers = {"Content-Type": "application/json"}
+
+        with patch("requests.request", return_value=mock_response) as mock_req:
+            status, body = await sender._send_to_api_via_requests(
+                {"integration_test_id": "test-1"},
+                conn_config,
+                "test-1",
+            )
+
+        assert status == 201
+        assert body == {"id": "abc-123"}
+        mock_req.assert_called_once()
+        call_kwargs = mock_req.call_args
+        assert call_kwargs.kwargs["url"] == "https://api.itelinc.net/v1/requests"
+
+    async def test_requests_path_handles_non_json_response(self):
+        """Non-JSON responses should be wrapped in raw_body."""
+        sender = _make_submittable_sender()
+
+        conn_config = MagicMock()
+        conn_config.method = "POST"
+        conn_config.base_url = "https://api.itelinc.net"
+        conn_config.endpoint = "/v1/requests"
+        conn_config.timeout_seconds = 30
+
+        sender.connections._build_request_headers = AsyncMock(return_value={})
+
+        mock_response = MagicMock()
+        mock_response.status_code = 502
+        mock_response.text = "<html>Bad Gateway</html>"
+        mock_response.json.side_effect = ValueError("not json")
+        mock_response.headers = {}
+
+        with patch("requests.request", return_value=mock_response):
+            status, body = await sender._send_to_api_via_requests(
+                {"integration_test_id": "test-2"},
+                conn_config,
+                "test-2",
+            )
+
+        assert status == 502
+        assert body == {"raw_body": "<html>Bad Gateway</html>"}
