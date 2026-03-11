@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from apps.itel_cabinet.api_sender import ItelApiSender
+from core.errors.exceptions import PermanentError
 
 
 # ---------------------------------------------------------------------------
@@ -248,4 +249,73 @@ class TestHandleApiResultDuplicate:
         )
 
         assert is_error is True
+        sender._error_producer.send.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# Disconnect with 2xx partial status treated as success
+# ---------------------------------------------------------------------------
+
+
+def _make_submittable_sender():
+    """Build a sender with mocked _send_to_api, _transform, and debug write."""
+    sender = _make_sender()
+    sender.api_config = {"connection": "itel", "carrier_id": "C1", "subscription_id": "S1"}
+    sender.simulation_config = None
+    sender.debug_output_dir = MagicMock()
+    sender.connections = MagicMock()
+
+    # Mock _transform_to_api_format to return a simple payload
+    sender._transform_to_api_format = MagicMock(return_value=_make_api_payload())
+    # Mock _write_debug_payload to be a no-op
+    sender._write_debug_payload = AsyncMock()
+    return sender
+
+
+class TestSubmitDisconnectWith2xx:
+    async def test_disconnect_with_201_treated_as_success(self):
+        """When server disconnects with 201, submit() should return True (success)."""
+        sender = _make_submittable_sender()
+
+        disconnect_error = PermanentError(
+            "Server disconnected with status 201",
+            context={"partial_status": 201, "method": "POST", "url": "https://api.itel.com/v1"},
+        )
+        sender._send_to_api = AsyncMock(side_effect=disconnect_error)
+
+        result = await sender.submit(_make_original_payload())
+
+        assert result is True
+        sender._success_producer.send.assert_awaited_once()
+        call_kwargs = sender._success_producer.send.call_args.kwargs
+        assert call_kwargs["value"]["api_status"] == 201
+
+    async def test_disconnect_with_400_raises(self):
+        """When server disconnects with 400, submit() should re-raise."""
+        sender = _make_submittable_sender()
+
+        disconnect_error = PermanentError(
+            "Server disconnected with status 400",
+            context={"partial_status": 400, "method": "POST", "url": "https://api.itel.com/v1"},
+        )
+        sender._send_to_api = AsyncMock(side_effect=disconnect_error)
+
+        with pytest.raises(PermanentError):
+            await sender.submit(_make_original_payload())
+
+        sender._error_producer.send.assert_awaited_once()
+
+    async def test_disconnect_without_partial_status_raises(self):
+        """A PermanentError without partial_status should re-raise."""
+        sender = _make_submittable_sender()
+
+        disconnect_error = PermanentError(
+            "Server disconnected",
+            context={"method": "POST", "url": "https://api.itel.com/v1"},
+        )
+        sender._send_to_api = AsyncMock(side_effect=disconnect_error)
+
+        with pytest.raises(PermanentError):
+            await sender.submit(_make_original_payload())
+
         sender._error_producer.send.assert_awaited_once()
