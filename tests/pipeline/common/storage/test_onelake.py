@@ -364,6 +364,19 @@ class TestCredentialRegistry:
 
 
 class TestTCPKeepAliveAdapter:
+    def _expected_keepalive_options(self):
+        """Return the expected socket options for the current platform."""
+        opts = [(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)]
+        if hasattr(socket, "TCP_KEEPIDLE"):
+            opts.append((socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 120))
+        elif hasattr(socket, "TCP_KEEPALIVE"):
+            opts.append((socket.IPPROTO_TCP, socket.TCP_KEEPALIVE, 120))
+        if hasattr(socket, "TCP_KEEPINTVL"):
+            opts.append((socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 30))
+        if hasattr(socket, "TCP_KEEPCNT"):
+            opts.append((socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 8))
+        return opts
+
     def test_init_poolmanager_adds_keepalive_options(self):
         adapter = TCPKeepAliveAdapter()
         # Call init_poolmanager with mocked super
@@ -373,11 +386,11 @@ class TestTCPKeepAliveAdapter:
             adapter.init_poolmanager(1, 1)
             call_kwargs = mock_super.call_args[1]
             opts = call_kwargs["socket_options"]
-            # Verify keepalive options are present
+            # SO_KEEPALIVE is always present
             assert (socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1) in opts
-            assert (socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 120) in opts
-            assert (socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 30) in opts
-            assert (socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 8) in opts
+            # Platform-specific options
+            for expected_opt in self._expected_keepalive_options():
+                assert expected_opt in opts
 
     def test_init_poolmanager_preserves_existing_socket_options(self):
         adapter = TCPKeepAliveAdapter()
@@ -390,8 +403,9 @@ class TestTCPKeepAliveAdapter:
             opts = call_kwargs["socket_options"]
             # Existing option should still be there
             assert (socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) in opts
-            # Plus the keepalive ones
-            assert len(opts) == 5
+            # Plus the keepalive ones (1 existing + platform-specific keepalive opts)
+            expected_count = 1 + len(self._expected_keepalive_options())
+            assert len(opts) == expected_count
 
 
 # ---------------------------------------------------------------------------
