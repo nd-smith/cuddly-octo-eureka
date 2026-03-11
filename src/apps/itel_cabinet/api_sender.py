@@ -20,7 +20,7 @@ from typing import Any
 import orjson
 
 from config.config import MessageConfig, expand_env_var_string
-from core.errors.exceptions import PermanentError
+from core.errors.exceptions import PermanentError, TransientError
 from pipeline.common.connections import ConnectionManager, is_http_error
 from pipeline.common.transport import create_producer
 from pipeline.common.config_loader import load_connections, load_yaml_config
@@ -492,6 +492,16 @@ class ItelApiSender:
         except Exception:
             logger.warning("Failed to compute payload diagnostics", exc_info=True)
 
+        # ── Experimental: use stdlib requests instead of aiohttp ──
+        # Toggle with ITEL_USE_REQUESTS_LIB=true to test whether the
+        # server-disconnect issue is aiohttp-specific.  Easily reversible:
+        # unset the env var (or set to anything other than "true") to
+        # revert to the normal aiohttp path.
+        if os.environ.get("ITEL_USE_REQUESTS_LIB", "").lower() == "true":
+            return await self._send_to_api_via_requests(
+                api_payload, conn_config, assignment_id,
+            )
+
         status, response = await self.connections.request_json(
             connection_name=connection_name,
             method=conn_config.method,
@@ -522,6 +532,104 @@ class ItelApiSender:
                     "outcome": "success",
                     "response_body": str(response)[:500],
                 },
+            )
+
+        return status, response
+
+    async def _send_to_api_via_requests(
+        self,
+        api_payload: dict,
+        conn_config,
+        assignment_id: str,
+    ) -> tuple[int, dict]:
+        """Send payload using the synchronous `requests` library (experimental).
+
+        Runs the blocking HTTP call in a thread-pool executor so it doesn't
+        stall the event loop.  Uses the same OAuth2 token and headers as the
+        normal aiohttp path.
+
+        Enable with env var: ITEL_USE_REQUESTS_LIB=true
+        Disable by unsetting (or setting to anything other than "true").
+        """
+        import asyncio
+        import functools
+        import time as _time
+
+        import requests as req
+
+        connection_name = self.api_config["connection"]
+        # Reuse the ConnectionManager's header-building (incl. OAuth2 token)
+        request_headers = await self.connections._build_request_headers(
+            conn_config,
+            {"Ocp-Apim-Subscription-Key": self.api_config.get("subscription_id", "")},
+        )
+        request_headers["Content-Type"] = "application/json"
+
+        url = f"{conn_config.base_url}{conn_config.endpoint}"
+        timeout = conn_config.timeout_seconds
+
+        logger.info(
+            "[REQUESTS-LIB] Sending %s %s (timeout=%ds)",
+            conn_config.method,
+            url,
+            timeout,
+            extra={
+                "assignment_id": assignment_id,
+                "http_lib": "requests",
+                "method": conn_config.method,
+                "url": url,
+            },
+        )
+
+        def _do_request() -> req.Response:
+            t0 = _time.monotonic()
+            resp = req.request(
+                method=conn_config.method,
+                url=url,
+                json=api_payload,
+                headers=request_headers,
+                timeout=timeout,
+            )
+            elapsed = (_time.monotonic() - t0) * 1000
+            logger.info(
+                "[REQUESTS-LIB] Response: %s %s -> %d (%.0fms) body=%s",
+                conn_config.method,
+                url,
+                resp.status_code,
+                elapsed,
+                resp.text[:500],
+                extra={
+                    "assignment_id": assignment_id,
+                    "http_lib": "requests",
+                    "status": resp.status_code,
+                    "elapsed_ms": round(elapsed, 1),
+                    "response_headers": dict(resp.headers),
+                },
+            )
+            return resp
+
+        loop = asyncio.get_running_loop()
+        resp = await loop.run_in_executor(None, _do_request)
+
+        status = resp.status_code
+        try:
+            response = resp.json()
+        except (json.JSONDecodeError, ValueError):
+            response = {"raw_body": resp.text} if resp.text else {}
+
+        if is_http_error(status):
+            logger.error(
+                "[REQUESTS-LIB] iTel API error: status=%s body=%s",
+                status,
+                str(response)[:500],
+                extra={"status": status, "assignment_id": assignment_id},
+            )
+        else:
+            logger.info(
+                "[REQUESTS-LIB] iTel API success: status=%s assignment=%s",
+                status,
+                assignment_id,
+                extra={"status": status, "assignment_id": assignment_id},
             )
 
         return status, response
