@@ -5,7 +5,11 @@ from unittest.mock import patch
 import pytest
 
 import core.security.ssl_dev_bypass as ssl_bypass_module
-from core.security.ssl_dev_bypass import apply_ssl_dev_bypass, get_eventhub_ssl_kwargs
+from core.security.ssl_dev_bypass import (
+    apply_ssl_dev_bypass,
+    get_aiohttp_ssl_context,
+    get_eventhub_ssl_kwargs,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -137,3 +141,27 @@ class TestGetEventhubSslKwargs:
         # Verify it works when unpacked
         assert "connection_verify" in kwargs
         assert kwargs["connection_verify"] is False
+
+
+# =========================================================================
+# get_aiohttp_ssl_context
+# =========================================================================
+
+
+class TestGetAiohttpSslContext:
+    def test_returns_none_when_not_patched(self):
+        ssl_bypass_module._patched = False
+        result = get_aiohttp_ssl_context()
+        assert result is None
+
+    def test_returns_false_when_patched(self):
+        ssl_bypass_module._patched = True
+        result = get_aiohttp_ssl_context()
+        assert result is False
+
+    def test_none_is_noop_for_aiohttp(self):
+        """None lets aiohttp use its default SSL context (verification enabled)."""
+        ssl_bypass_module._patched = False
+        ctx = get_aiohttp_ssl_context()
+        # When passed as ssl=None to TCPConnector, aiohttp uses default behavior
+        assert ctx is None
