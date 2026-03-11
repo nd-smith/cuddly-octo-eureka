@@ -535,8 +535,8 @@ class TestEventIngesterWorkerDedupSourceTracking:
         assert worker._dedup_blob_hits == 0
 
     @pytest.mark.asyncio
-    async def test_blob_check_queued_for_background_reconciliation(self, mock_config, sample_message):
-        """Blob storage check is queued for background, not blocking hot path."""
+    async def test_blob_dedup_not_checked_on_hot_path(self, mock_config, sample_message):
+        """Blob storage is not consulted during batch processing (hot path)."""
         worker = EventIngesterWorker(config=mock_config)
 
         mock_store = AsyncMock()
@@ -546,13 +546,10 @@ class TestEventIngesterWorkerDedupSourceTracking:
         worker._dedup_store = mock_store
 
         parsed, _, _ = await worker._parse_and_dedup_events([sample_message])
-        # Events pass through hot path (blob dedup is async background)
+        # Events pass through — blob dedup is not on the hot path
         assert len(parsed) == 1
-        # Verify batch was queued for background reconciliation
-        assert not worker._pending_blob_checks.empty()
-        queued_batch = worker._pending_blob_checks.get_nowait()
-        assert len(queued_batch) == 1
-        assert queued_batch[0][0] == "trace-123"
+        # Blob check_duplicate should never be called during parse_and_dedup
+        mock_store.check_duplicate.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_no_hit_increments_nothing(self, mock_config, sample_message):
