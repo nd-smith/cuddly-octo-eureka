@@ -31,6 +31,7 @@ from pipeline.common.metrics import (
     update_connection_status,
     update_disk_usage,
 )
+from core.errors.exceptions import classify_exception, is_retryable_error
 from pipeline.common.stale_file_cleaner import StaleFileCleaner
 from pipeline.common.storage import OneLakeClient
 from pipeline.common.telemetry import initialize_worker_telemetry
@@ -468,12 +469,14 @@ class ClaimXUploadWorker:
 
     async def _produce_failure_result(
         self, message: PipelineMessage, cached_message: ClaimXCachedDownloadMessage | None, error: Exception,
+        *, permanent: bool = True,
     ) -> None:
         """Produce a failure result message for a failed upload."""
         try:
             if cached_message is None:
                 cached_message = ClaimXCachedDownloadMessage.model_validate_json(message.value)
 
+            status = "failed_permanent" if permanent else "failed"
             result_message = ClaimXUploadResultMessage(
                 media_id=cached_message.media_id,
                 project_id=cached_message.project_id,
@@ -482,7 +485,7 @@ class ClaimXUploadWorker:
                 file_type=cached_message.file_type,
                 file_name=cached_message.file_name,
                 trace_id=cached_message.trace_id,
-                status="failed_permanent",
+                status=status,
                 bytes_uploaded=0,
                 error_message=str(error)[:500],
                 created_at=datetime.now(UTC),
@@ -584,10 +587,11 @@ class ClaimXUploadWorker:
         except Exception as e:
             processing_time_ms = int((time.perf_counter() - start_time) * 1000)
 
+            error_category = classify_exception(e).value
             log_worker_error(
                 logger,
                 "Upload failed",
-                error_category="permanent",
+                error_category=error_category,
                 trace_id=cached_message.trace_id if cached_message else None,
                 exc=e,
                 media_id=media_id,
@@ -597,7 +601,8 @@ class ClaimXUploadWorker:
             record_processing_error(message.topic, self._consumer_group, "upload_error")
             self._records_failed += 1
 
-            await self._produce_failure_result(message, cached_message, e)
+            is_permanent = not is_retryable_error(e)
+            await self._produce_failure_result(message, cached_message, e, permanent=is_permanent)
 
             return UploadResult(
                 message=message,

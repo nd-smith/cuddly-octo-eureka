@@ -121,6 +121,7 @@ class ClaimXResultProcessor:
         self._records_succeeded = 0
         self._records_failed = 0
         self._records_skipped = 0
+        self._pending_failed_commits = 0
         self._cycle_offset_start_ts = None
         self._cycle_offset_end_ts = None
         self._batches_written = 0
@@ -330,6 +331,7 @@ class ClaimXResultProcessor:
 
         elif result.status in ("failed_permanent", "failed"):
             self._records_failed += 1
+            self._pending_failed_commits += 1
             category = "permanent" if result.status == "failed_permanent" else "transient"
             label = "Upload failed permanently" if category == "permanent" else "Upload failed (transient)"
             log_worker_error(
@@ -368,6 +370,9 @@ class ClaimXResultProcessor:
     async def _periodic_flush(self) -> None:
         """
         Background task for timeout-based batch flushing.
+
+        Also commits checkpoints for failed messages that don't produce
+        Delta writes, to prevent them from being redelivered indefinitely.
         """
         while self._running:
             await asyncio.sleep(1)
@@ -383,6 +388,20 @@ class ClaimXResultProcessor:
                         },
                     )
                     await self._flush_batch()
+                elif not self._batch and self._pending_failed_commits > 0 and elapsed >= self.batch_timeout_seconds:
+                    # Commit checkpoint for failed messages even though there's
+                    # nothing to write to Delta. Without this, permanent failures
+                    # are never checkpointed and get redelivered forever.
+                    if self.consumer:
+                        logger.info(
+                            "Committing checkpoint for failed messages",
+                            extra={
+                                "pending_failed": self._pending_failed_commits,
+                            },
+                        )
+                        await self.consumer.commit()
+                    self._pending_failed_commits = 0
+                    self._last_flush = time.monotonic()
 
     async def _flush_batch(self) -> None:
         """
@@ -442,6 +461,7 @@ class ClaimXResultProcessor:
             if self.consumer:
                 await self.consumer.commit()
 
+            self._pending_failed_commits = 0
             self._batches_written += 1
             self._total_records_written += batch_size
 
