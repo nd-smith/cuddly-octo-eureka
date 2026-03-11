@@ -556,6 +556,7 @@ class ItelApiSender:
         import time as _time
 
         import requests as req
+        from requests.structures import CaseInsensitiveDict
 
         connection_name = self.api_config["connection"]
         # Reuse the ConnectionManager's header-building (incl. OAuth2 token)
@@ -568,42 +569,106 @@ class ItelApiSender:
         url = f"{conn_config.base_url}{conn_config.endpoint}"
         timeout = conn_config.timeout_seconds
 
+        # Log the full outgoing request headers (mask auth tokens)
+        safe_headers = {
+            k: (v[:12] + "..." if k.lower() in ("authorization", "ocp-apim-subscription-key") else v)
+            for k, v in request_headers.items()
+        }
+        serialized_body = json.dumps(api_payload, default=str)
         logger.info(
-            "[REQUESTS-LIB] Sending %s %s (timeout=%ds)",
+            "[REQUESTS-LIB] Sending %s %s (timeout=%ds) request_headers=%s payload_bytes=%d",
             conn_config.method,
             url,
             timeout,
+            safe_headers,
+            len(serialized_body.encode("utf-8")),
             extra={
                 "assignment_id": assignment_id,
                 "http_lib": "requests",
                 "method": conn_config.method,
                 "url": url,
+                "request_headers": safe_headers,
+                "payload_bytes": len(serialized_body.encode("utf-8")),
             },
         )
 
         def _do_request() -> req.Response:
             t0 = _time.monotonic()
-            resp = req.request(
-                method=conn_config.method,
-                url=url,
-                json=api_payload,
-                headers=request_headers,
-                timeout=timeout,
-            )
+            try:
+                resp = req.request(
+                    method=conn_config.method,
+                    url=url,
+                    json=api_payload,
+                    headers=request_headers,
+                    timeout=timeout,
+                )
+            except req.exceptions.ConnectionError as exc:
+                elapsed = (_time.monotonic() - t0) * 1000
+                # Try to extract any partial info from the underlying urllib3 response
+                raw_resp = getattr(exc, "response", None)
+                logger.error(
+                    "[REQUESTS-LIB] CONNECTION ERROR after %.0fms: %s "
+                    "raw_response=%s raw_response_type=%s "
+                    "underlying_exception=%r",
+                    elapsed,
+                    exc,
+                    raw_resp,
+                    type(raw_resp).__name__ if raw_resp else "None",
+                    exc.__cause__,
+                    extra={
+                        "assignment_id": assignment_id,
+                        "http_lib": "requests",
+                        "elapsed_ms": round(elapsed, 1),
+                        "error_type": type(exc).__name__,
+                        "error_cause_type": type(exc.__cause__).__name__ if exc.__cause__ else "None",
+                        "raw_response": repr(raw_resp),
+                    },
+                )
+                raise
+            except Exception as exc:
+                elapsed = (_time.monotonic() - t0) * 1000
+                logger.error(
+                    "[REQUESTS-LIB] UNEXPECTED ERROR after %.0fms: %r",
+                    elapsed,
+                    exc,
+                    extra={
+                        "assignment_id": assignment_id,
+                        "http_lib": "requests",
+                        "elapsed_ms": round(elapsed, 1),
+                        "error_type": type(exc).__name__,
+                    },
+                )
+                raise
+
             elapsed = (_time.monotonic() - t0) * 1000
+
+            # Log raw response details
+            raw_headers = dict(resp.headers) if resp.headers else {}
+            raw_body = resp.text[:2000] if resp.text else ""
             logger.info(
-                "[REQUESTS-LIB] Response: %s %s -> %d (%.0fms) body=%s",
+                "[REQUESTS-LIB] Response: %s %s -> %d (%.0fms)\n"
+                "  response_headers=%s\n"
+                "  raw_body=%s\n"
+                "  encoding=%s http_version=%s reason=%s",
                 conn_config.method,
                 url,
                 resp.status_code,
                 elapsed,
-                resp.text[:500],
+                raw_headers,
+                raw_body[:500],
+                resp.encoding,
+                getattr(resp.raw, "version", "unknown"),
+                resp.reason,
                 extra={
                     "assignment_id": assignment_id,
                     "http_lib": "requests",
                     "status": resp.status_code,
                     "elapsed_ms": round(elapsed, 1),
-                    "response_headers": dict(resp.headers),
+                    "response_headers": raw_headers,
+                    "raw_body": raw_body,
+                    "encoding": resp.encoding,
+                    "http_version": getattr(resp.raw, "version", "unknown"),
+                    "reason": resp.reason,
                 },
             )
             return resp
