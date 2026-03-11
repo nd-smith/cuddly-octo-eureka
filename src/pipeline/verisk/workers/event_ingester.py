@@ -118,7 +118,7 @@ class EventIngesterWorker:
         # OrderedDict for O(1) LRU eviction: trace_id -> (event_id, timestamp)
         self._dedup_cache: OrderedDict[str, tuple[str, float]] = OrderedDict()
         self._dedup_cache_ttl_seconds = 86400  # 24 hours
-        self._dedup_cache_max_size = 200_000  # ~4MB memory for 200k entries
+        self._dedup_cache_max_size = 500_000  # ~10MB memory for 500k entries
 
         # Persistent blob storage (survives worker restarts)
         self._dedup_store: DedupStoreProtocol | None = None
@@ -222,7 +222,7 @@ class EventIngesterWorker:
                 consumer_config=ConsumerConfig(
                     batch_size=self.REALTIME_BATCH_SIZE,
                     max_batch_size=self.BACKFILL_BATCH_SIZE,
-                    batch_timeout_ms=200,
+                    batch_timeout_ms=500,
                     prefetch=5000,
                 ),
                 health_server=self.health_server,
@@ -433,48 +433,14 @@ class EventIngesterWorker:
 
             parsed_events.append((event, event_id))
 
-        if self._dedup_store and parsed_events:
-            blob_duplicates = await self._check_blob_duplicates(parsed_events)
-            dedup_counts["blob"] = list(blob_duplicates)
-            parsed_events = [
-                (ev, eid) for ev, eid in parsed_events
-                if ev.trace_id not in blob_duplicates
-            ]
+        # Blob dedup removed from hot path — it was the primary throughput
+        # bottleneck (~200ms+ of HTTP round-trips per batch). The memory cache
+        # (500k entries, 24h TTL) handles real-time dedup. Blob storage is only
+        # used for persistence across restarts via:
+        #   - _mark_processed: fire-and-forget writes on the hot path
+        #   - _prewarm_dedup_cache: bulk load on startup
 
         return parsed_events, dedup_counts, permanent_failures
-
-    async def _check_blob_duplicates(
-        self, events: list[tuple[EventMessage, str]],
-    ) -> set[str]:
-        """Check blob storage for duplicates, return set of duplicate trace IDs."""
-        async def _check_one(trace_id: str) -> tuple[str, bool]:
-            async with self._blob_semaphore:
-                try:
-                    is_dup, metadata = await self._dedup_store.check_duplicate(
-                        self._dedup_worker_name, trace_id, self._dedup_cache_ttl_seconds,
-                    )
-                    if is_dup and metadata:
-                        cached_event_id = metadata.get("event_id")
-                        timestamp = metadata.get("timestamp", time.time())
-                        self._dedup_cache[trace_id] = (cached_event_id, timestamp)
-                        self._dedup_blob_hits += 1
-                        return trace_id, True
-                except Exception as e:
-                    logger.warning(
-                        "Error checking blob storage for duplicate (falling back to memory-only)",
-                        extra={"trace_id": trace_id, "error": str(e)},
-                    )
-                return trace_id, False
-
-        results = await asyncio.gather(
-            *(_check_one(ev.trace_id) for ev, _ in events)
-        )
-        duplicates = {tid for tid, is_dup in results if is_dup}
-
-        for _ in duplicates:
-            self._records_deduplicated += 1
-
-        return duplicates
 
     def _build_enrichment_tasks(
         self, parsed_events: list[tuple[EventMessage, str]],
