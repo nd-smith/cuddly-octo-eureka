@@ -238,6 +238,32 @@ def apply_ssl_dev_bypass() -> None:
     )
 
 
+def get_aiohttp_ssl_context():
+    """Get the SSL context parameter for aiohttp TCPConnector.
+
+    When the SSL dev bypass is active, returns ``False`` to disable certificate
+    verification.  Otherwise returns ``None`` so aiohttp uses its default
+    (verified) SSL context.
+
+    aiohttp may cache or import ``ssl.create_default_context`` before
+    ``apply_ssl_dev_bypass()`` runs, so the global monkey-patch alone is not
+    reliable.  Passing ``ssl=False`` explicitly to ``TCPConnector`` guarantees
+    verification is skipped regardless of import order.
+
+    Returns:
+        ``False`` when bypass is active, ``None`` otherwise.  Intended to be
+        passed as the ``ssl`` parameter to ``aiohttp.TCPConnector``::
+
+            connector = aiohttp.TCPConnector(
+                ssl=get_aiohttp_ssl_context(),
+                ...
+            )
+    """
+    if _patched:
+        return False
+    return None
+
+
 def get_eventhub_ssl_kwargs() -> dict:
     """Get SSL-related kwargs for azure-eventhub SDK constructors.
 

@@ -33,6 +33,7 @@ from typing import Any
 import aiohttp
 
 from config.config import MessageConfig
+from core.security.ssl_dev_bypass import get_aiohttp_ssl_context
 from core.download.downloader import AttachmentDownloader
 from core.download.models import DownloadOutcome, DownloadTask
 from core.errors.exceptions import CircuitOpenError
@@ -416,6 +417,7 @@ class DownloadWorker:
             limit_per_host=10,
             ttl_dns_cache=300,
             enable_cleanup_closed=True,
+            ssl=get_aiohttp_ssl_context(),
         )
         timeout = aiohttp.ClientTimeout(
             total=300,

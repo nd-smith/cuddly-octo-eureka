@@ -18,6 +18,7 @@ from typing import Any
 import aiohttp
 
 from core.errors.exceptions import PermanentError, TransientError
+from core.security.ssl_dev_bypass import get_aiohttp_ssl_context
 from core.resilience.retry import RetryConfig, with_retry_async
 
 logger = logging.getLogger(__name__)
@@ -389,6 +390,7 @@ class ConnectionManager:
             limit_per_host=self._connector_limit_per_host,
             enable_cleanup_closed=True,
             force_close=True,
+            ssl=get_aiohttp_ssl_context(),
         )
 
         self._session = aiohttp.ClientSession(

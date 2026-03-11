@@ -9,6 +9,7 @@ from typing import Any
 import aiohttp
 
 from core.logging.context import get_log_context
+from core.security.ssl_dev_bypass import get_aiohttp_ssl_context
 from core.resilience.circuit_breaker import (
     CLAIMX_API_CIRCUIT_CONFIG,
     get_circuit_breaker,
@@ -143,6 +144,7 @@ class ClaimXApiClient:
             connector = aiohttp.TCPConnector(
                 limit=self.max_concurrent,
                 limit_per_host=self.max_concurrent,
+                ssl=get_aiohttp_ssl_context(),
             )
             self._session = aiohttp.ClientSession(
                 connector=connector,
