@@ -12,6 +12,7 @@ from core.oauth2.exceptions import (
     TokenAcquisitionError,
 )
 from core.oauth2.models import OAuth2Config, OAuth2Token
+from core.security.ssl_dev_bypass import get_aiohttp_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,8 @@ class GenericOAuth2Provider(BaseOAuth2Provider):
     async def _ensure_session(self) -> aiohttp.ClientSession:
         """Get or create HTTP client session."""
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
+            connector = aiohttp.TCPConnector(ssl=get_aiohttp_ssl_context())
+            self._session = aiohttp.ClientSession(connector=connector)
         return self._session
 
     async def acquire_token(self) -> OAuth2Token:
