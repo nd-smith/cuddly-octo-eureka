@@ -6,7 +6,7 @@ Timestamp is also stored as blob metadata (HTTP headers) for fast
 HEAD-based existence checks via get_blob_properties().
 
 Storage structure:
-    container/worker-name/key.json -> {"event_id": "...", "timestamp": 1234567890}
+    container/worker-name/key.json -> {"timestamp": 1234567890}
 
 Example:
     eventhub-dedup-cache/verisk-event-ingester/trace_abc123.json
@@ -176,7 +176,7 @@ class BlobDedupStore:
         blob_name = f"{worker_name}/{key}.json"
         blob_client = self._container.get_blob_client(blob_name)
 
-        # Store timestamp (and event_id if present) as blob metadata for HEAD checks
+        # Store timestamp as blob metadata for HEAD checks
         blob_metadata = {"timestamp": str(metadata["timestamp"])}
         if "event_id" in metadata:
             blob_metadata["event_id"] = metadata["event_id"]

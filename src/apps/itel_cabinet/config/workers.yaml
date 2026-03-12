@@ -120,7 +120,7 @@ workers:
 # Option A — Direct injection (recommended for iTel API testing):
 #   Use tools/inject_itel_message.py to publish directly to the
 #   itel-cabinet-pending topic, bypassing the ClaimX ingester and dedup.
-#   A fresh UUID event_id is generated each run so the message is never blocked.
+#   A fresh UUID trace_id is generated each run so the message is never blocked.
 #
 #   export EVENTHUB_NAMESPACE_CONNECTION_STRING="Endpoint=sb://..."
 #   python3 tools/inject_itel_message.py payload.json
@@ -132,8 +132,8 @@ workers:
 #
 #   export EVENTHUB_DEDUP_ENABLED=false
 #
-# Option C — Unique event IDs per replay:
+# Option C — Unique trace IDs per replay:
 #   The dedup key is the Kafka/Event Hub message key. Sending the same payload
-#   with a different message key (or different event_id) will always pass through.
+#   with a different message key (or different trace_id) will always pass through.
 #
 # =============================================================================
