@@ -3,7 +3,7 @@ Event Ingester Worker - Consumes events and produces enrichment tasks.
 
 Entry point to the enrichment and download pipeline:
 1. Consumes EventMessage from events.raw topic
-2. Deduplicates via memory cache + blob storage
+2. Deduplicates via in-memory LRU cache (pre-warmed from blob on startup)
 3. Creates XACTEnrichmentTask (with raw_event payload) for each event
 4. Produces to enrichment.pending topic for plugin execution
 
@@ -105,7 +105,6 @@ class EventIngesterWorker:
         self._records_skipped = 0
         self._records_deduplicated = 0
         self._dedup_memory_hits = 0
-        self._dedup_blob_hits = 0
         self._cycle_offset_start_ts = None
         self._cycle_offset_end_ts = None
         self._stats_logger: PeriodicStatsLogger | None = None
@@ -114,18 +113,16 @@ class EventIngesterWorker:
         # Dedup bypass flag (checked at start from config)
         self._dedup_enabled = True
 
-        # Hybrid dedup: in-memory cache (fast path) + blob storage (persistent)
+        # In-memory dedup cache, pre-warmed from blob storage on startup
         # OrderedDict for O(1) LRU eviction: trace_id -> (event_id, timestamp)
         self._dedup_cache: OrderedDict[str, tuple[str, float]] = OrderedDict()
         self._dedup_cache_ttl_seconds = 86400  # 24 hours
         self._dedup_cache_max_size = 500_000  # ~10MB memory for 500k entries
 
-        # Persistent blob storage (survives worker restarts)
+        # Blob dedup store (read-only, used for startup prewarm only)
         self._dedup_store: DedupStoreProtocol | None = None
         self._dedup_worker_name = "verisk-event-ingester"
         self._dedup_cleanup_task: asyncio.Task | None = None
-        self._blob_write_tasks: set[asyncio.Task] = set()
-        self._blob_semaphore = asyncio.Semaphore(100)
 
         # Health check server
         health_port = 8092
@@ -301,7 +298,7 @@ class EventIngesterWorker:
         """
         start_time = time.perf_counter()
 
-        # Parse, dedup (memory + blob), and collect non-duplicate events
+        # Parse, dedup (memory cache), and collect non-duplicate events
         parsed_events, dedup_counts, permanent_failures = await self._parse_and_dedup_events(records)
 
         # Build enrichment tasks from non-duplicate events
@@ -338,10 +335,6 @@ class EventIngesterWorker:
         # Adjust batch size based on batch fullness (backfill vs realtime)
         # A full batch signals we're behind; a partial batch signals we're caught up.
         self._adjust_batch_size(len(records))
-
-        # Periodic cleanup of completed fire-and-forget blob write tasks
-        if len(self._blob_write_tasks) > 200:
-            self._blob_write_tasks = {t for t in self._blob_write_tasks if not t.done()}
 
         # Record batch processing duration
         duration = time.perf_counter() - start_time
@@ -389,7 +382,7 @@ class EventIngesterWorker:
     async def _parse_and_dedup_events(
         self, records: list[PipelineMessage],
     ) -> tuple[list[tuple[EventMessage, str]], dict[str, list[str]], list[tuple[PipelineMessage, Exception]]]:
-        """Parse records, deduplicate via memory cache and blob storage.
+        """Parse records, deduplicate via in-memory LRU cache.
 
         Returns non-duplicate (event, event_id) pairs, dedup diagnostic counts,
         and permanent failures (unparseable messages) for DLQ routing.
@@ -398,7 +391,7 @@ class EventIngesterWorker:
         permanent_failures: list[tuple[PipelineMessage, Exception]] = []
         seen_in_batch: set[str] = set()
         dedup_counts: dict[str, list[str]] = {
-            "intra_batch": [], "memory": [], "blob": [],
+            "intra_batch": [], "memory": [],
         }
         now = time.time()
 
@@ -432,13 +425,6 @@ class EventIngesterWorker:
                 continue
 
             parsed_events.append((event, event_id))
-
-        # Blob dedup removed from hot path — it was the primary throughput
-        # bottleneck (~200ms+ of HTTP round-trips per batch). The memory cache
-        # (500k entries, 24h TTL) handles real-time dedup. Blob storage is only
-        # used for persistence across restarts via:
-        #   - _mark_processed: fire-and-forget writes on the hot path
-        #   - _prewarm_dedup_cache: bulk load on startup
 
         return parsed_events, dedup_counts, permanent_failures
 
@@ -502,20 +488,18 @@ class EventIngesterWorker:
         """Log dedup diagnostics with sample trace_ids for KQL cross-referencing."""
         intra_batch = dedup_counts["intra_batch"]
         memory = dedup_counts["memory"]
-        blob = dedup_counts["blob"]
-        total_deduped = len(intra_batch) + len(memory) + len(blob)
+        total_deduped = len(intra_batch) + len(memory)
 
         if not total_deduped:
             return
 
-        sample_ids = (memory + blob + intra_batch)[:10]
+        sample_ids = (memory + intra_batch)[:10]
         logger.info(
-            "Batch dedup: %d duplicates (%d memory, %d blob, %d intra-batch)",
-            total_deduped, len(memory), len(blob), len(intra_batch),
+            "Batch dedup: %d duplicates (%d memory, %d intra-batch)",
+            total_deduped, len(memory), len(intra_batch),
             extra={
                 "duplicate_count": total_deduped,
                 "dedup_memory_count": len(memory),
-                "dedup_blob_count": len(blob),
                 "dedup_intra_batch_count": len(intra_batch),
                 "sample_trace_ids": sample_ids,
             },
@@ -536,7 +520,6 @@ class EventIngesterWorker:
             "records_skipped": self._records_skipped,
             "records_deduplicated": self._records_deduplicated,
             "dedup_memory_hits": self._dedup_memory_hits,
-            "dedup_blob_hits": self._dedup_blob_hits,
             "batch_mode": "backfill" if self.consumer and self.consumer.batch_size == self.BACKFILL_BATCH_SIZE else "realtime",
             "current_batch_size": self.consumer.batch_size if self.consumer else self.REALTIME_BATCH_SIZE,
             "cycle_offset_start_ts": self._cycle_offset_start_ts,
@@ -547,7 +530,7 @@ class EventIngesterWorker:
         return msg, extra
 
     def _mark_processed(self, trace_id: str, event_id: str) -> None:
-        """Add trace_id -> event_id mapping to memory cache, fire-and-forget to blob."""
+        """Add trace_id -> event_id mapping to memory dedup cache."""
         now = time.time()
 
         # If memory cache is full, evict oldest entries (LRU via OrderedDict)
@@ -567,27 +550,6 @@ class EventIngesterWorker:
         # Add to memory cache (at end for LRU ordering)
         self._dedup_cache[trace_id] = (event_id, now)
         self._dedup_cache.move_to_end(trace_id)
-
-        # Persist to blob storage — truly fire-and-forget (don't block on HTTP)
-        if self._dedup_store:
-            task = asyncio.create_task(self._persist_dedup_to_blob(trace_id, event_id, now))
-            self._blob_write_tasks.add(task)
-            task.add_done_callback(self._blob_write_tasks.discard)
-
-    async def _persist_dedup_to_blob(self, trace_id: str, event_id: str, timestamp: float) -> None:
-        """Fire-and-forget blob persistence for dedup markers."""
-        async with self._blob_semaphore:
-            try:
-                await self._dedup_store.mark_processed(
-                    self._dedup_worker_name,
-                    trace_id,
-                    {"event_id": event_id, "timestamp": timestamp},
-                )
-            except Exception as e:
-                logger.warning(
-                    "Error persisting to blob storage (memory cache still updated)",
-                    extra={"trace_id": trace_id, "error": str(e)},
-                )
 
     # Prewarm cap: limit blob enumeration to avoid blocking startup
     _PREWARM_MAX_KEYS = 10_000

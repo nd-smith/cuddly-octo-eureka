@@ -493,15 +493,13 @@ class TestEventIngesterWorkerStats:
         assert extra["records_deduplicated"] == 2
 
     def test_get_cycle_stats_includes_dedup_source_counters(self, mock_config):
-        """Worker reports dedup memory and blob hit counts in cycle stats."""
+        """Worker reports dedup memory hit counts in cycle stats."""
         worker = EventIngesterWorker(config=mock_config)
         worker._dedup_memory_hits = 42
-        worker._dedup_blob_hits = 7
 
         _, extra = worker._get_cycle_stats(cycle_count=1)
 
         assert extra["dedup_memory_hits"] == 42
-        assert extra["dedup_blob_hits"] == 7
 
     def test_get_cycle_stats_includes_batch_mode(self, mock_config):
         """Worker reports batch mode and size in cycle stats."""
@@ -532,34 +530,15 @@ class TestEventIngesterWorkerDedupSourceTracking:
         parsed, _, _ = await worker._parse_and_dedup_events([sample_message])
         assert len(parsed) == 0
         assert worker._dedup_memory_hits == 1
-        assert worker._dedup_blob_hits == 0
-
-    @pytest.mark.asyncio
-    async def test_blob_dedup_not_checked_on_hot_path(self, mock_config, sample_message):
-        """Blob storage is not consulted during batch processing (hot path)."""
-        worker = EventIngesterWorker(config=mock_config)
-
-        mock_store = AsyncMock()
-        mock_store.check_duplicate = AsyncMock(
-            return_value=(True, {"event_id": "evt-1", "timestamp": time.time()})
-        )
-        worker._dedup_store = mock_store
-
-        parsed, _, _ = await worker._parse_and_dedup_events([sample_message])
-        # Events pass through — blob dedup is not on the hot path
-        assert len(parsed) == 1
-        # Blob check_duplicate should never be called during parse_and_dedup
-        mock_store.check_duplicate.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_no_hit_increments_nothing(self, mock_config, sample_message):
-        """Cache miss does not increment either counter."""
+        """Cache miss does not increment dedup counter."""
         worker = EventIngesterWorker(config=mock_config)
 
         parsed, _, _ = await worker._parse_and_dedup_events([sample_message])
         assert len(parsed) == 1
         assert worker._dedup_memory_hits == 0
-        assert worker._dedup_blob_hits == 0
 
 
 class TestEventIngesterWorkerBatchSizeAdjustment:
