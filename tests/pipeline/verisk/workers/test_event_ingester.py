@@ -285,7 +285,7 @@ class TestEventIngesterWorkerDeduplication:
         parsed, dedup_counts, _ = await worker._parse_and_dedup_events([sample_message])
 
         assert len(parsed) == 1
-        assert parsed[0][0].trace_id == "trace-123"
+        assert parsed[0].trace_id == "trace-123"
 
     @pytest.mark.asyncio
     async def test_cached_event_deduplicated(self, mock_config, sample_message):
@@ -293,7 +293,7 @@ class TestEventIngesterWorkerDeduplication:
         worker = EventIngesterWorker(config=mock_config)
 
         # Mark as processed so memory cache has the entry
-        worker._mark_processed("trace-123", "evt-456")
+        worker._mark_processed("trace-123")
 
         parsed, dedup_counts, _ = await worker._parse_and_dedup_events([sample_message])
 
@@ -307,7 +307,7 @@ class TestEventIngesterWorkerDeduplication:
         worker._dedup_cache_ttl_seconds = 1  # 1 second TTL
 
         # Mark as processed
-        worker._mark_processed("trace-123", "evt-456")
+        worker._mark_processed("trace-123")
 
         # Wait for expiry
         time.sleep(1.1)
@@ -343,11 +343,10 @@ class TestEventIngesterWorkerDeduplication:
         """mark_processed adds entry to dedup cache."""
         worker = EventIngesterWorker(config=mock_config)
 
-        worker._mark_processed("trace-123", "evt-456")
+        worker._mark_processed("trace-123")
 
         assert "trace-123" in worker._dedup_cache
-        event_id, _ = worker._dedup_cache["trace-123"]
-        assert event_id == "evt-456"
+        assert isinstance(worker._dedup_cache["trace-123"], float)
 
     @pytest.mark.asyncio
     async def test_mark_processed_evicts_old_entries_when_full(self, mock_config):
@@ -357,10 +356,10 @@ class TestEventIngesterWorkerDeduplication:
 
         # Fill cache to capacity
         for i in range(10):
-            worker._mark_processed(f"trace-{i}", f"evt-{i}")
+            worker._mark_processed(f"trace-{i}")
 
         # Add one more - should trigger eviction
-        worker._mark_processed("trace-new", "evt-new")
+        worker._mark_processed("trace-new")
 
         # Verify cache size is maintained
         assert len(worker._dedup_cache) <= 10
@@ -376,14 +375,14 @@ class TestEventIngesterWorkerDeduplication:
         worker._dedup_cache_ttl_seconds = 1  # 1 second TTL
 
         # Add entries
-        worker._mark_processed("trace-1", "evt-1")
-        worker._mark_processed("trace-2", "evt-2")
+        worker._mark_processed("trace-1")
+        worker._mark_processed("trace-2")
 
         # Wait for expiry
         time.sleep(1.1)
 
         # Add fresh entry
-        worker._mark_processed("trace-3", "evt-3")
+        worker._mark_processed("trace-3")
 
         # Cleanup
         worker._cleanup_dedup_cache()
@@ -527,7 +526,7 @@ class TestEventIngesterWorkerDedupSourceTracking:
     async def test_memory_hit_increments_counter(self, mock_config, sample_message):
         """Memory cache hit increments _dedup_memory_hits."""
         worker = EventIngesterWorker(config=mock_config)
-        worker._mark_processed("trace-123", "evt-1")
+        worker._mark_processed("trace-123")
 
         parsed, _, _ = await worker._parse_and_dedup_events([sample_message])
         assert len(parsed) == 0
@@ -541,7 +540,7 @@ class TestEventIngesterWorkerDedupSourceTracking:
 
         mock_store = AsyncMock()
         mock_store.check_duplicate = AsyncMock(
-            return_value=(True, {"event_id": "evt-1", "timestamp": time.time()})
+            return_value=(True, {"timestamp": time.time()})
         )
         worker._dedup_store = mock_store
 

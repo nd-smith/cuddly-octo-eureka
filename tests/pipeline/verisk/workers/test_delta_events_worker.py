@@ -43,7 +43,7 @@ def _make_enrichment_task_message(trace_id="trace-123", topic="verisk.enrichment
     """Build a PipelineMessage containing a serialized XACTEnrichmentTask."""
     raw_event = _make_sample_raw_event(trace_id)
     task_data = {
-        "event_id": "evt-456",
+
         "trace_id": trace_id,
         "event_type": "verisk",
         "status_subtype": "documentsReceived",

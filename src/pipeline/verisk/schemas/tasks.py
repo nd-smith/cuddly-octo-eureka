@@ -18,7 +18,6 @@ if TYPE_CHECKING:
 class XACTEnrichmentTask(BaseModel):
     """Verisk enrichment task for plugin execution."""
 
-    event_id: str = Field(..., min_length=1)
     trace_id: str = Field(..., min_length=1)
     event_type: str = Field(..., min_length=1)
     status_subtype: str = Field(..., min_length=1)
@@ -38,7 +37,7 @@ class XACTEnrichmentTask(BaseModel):
         "for downstream Delta Lake writes via flatten_events()",
     )
 
-    @field_validator("event_id", "trace_id", "event_type", "status_subtype", "assignment_id")
+    @field_validator("trace_id", "event_type", "status_subtype", "assignment_id")
     @classmethod
     def validate_non_empty_strings(cls, v: str, _info) -> str:
         """Strip whitespace from string fields."""
@@ -61,7 +60,6 @@ class XACTEnrichmentTask(BaseModel):
         "json_schema_extra": {
             "examples": [
                 {
-                    "event_id": "evt_12345",
                     "trace_id": "abc123-def456",
                     "event_type": "xact",
                     "status_subtype": "paymentProcessorAssigned",
@@ -80,7 +78,6 @@ class XACTEnrichmentTask(BaseModel):
                     },
                 },
                 {
-                    "event_id": "evt_67890",
                     "trace_id": "xyz789-abc123",
                     "event_type": "xact",
                     "status_subtype": "documentsReceived",

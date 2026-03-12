@@ -17,9 +17,9 @@ Supported backends:
 Storage layout:
     Container: eventhub-dedup-cache
     ├── verisk-event-ingester/{trace_id}.json
-    └── claimx-event-ingester/{event_id}.json
+    └── claimx-event-ingester/{trace_id}.json
 
-Each blob contains: {"event_id": "...", "timestamp": 1234567890}
+Each blob contains: {"timestamp": 1234567890}
 
 Configuration:
 - Reads from config.yaml: eventhub.dedup_store section
@@ -31,7 +31,7 @@ Usage:
     if store:
         is_dup = await store.check_duplicate("worker-name", "trace_id_123")
         if not is_dup:
-            await store.mark_processed("worker-name", "trace_id_123", {"event_id": "..."})
+            await store.mark_processed("worker-name", "trace_id_123", {"timestamp": ...})
 """
 
 import asyncio

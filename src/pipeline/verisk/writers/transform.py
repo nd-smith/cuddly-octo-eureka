@@ -63,18 +63,10 @@ def _normalize_data_column(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def flatten_events(df: pl.DataFrame) -> pl.DataFrame:
-    # 1. Resolve event_id source logic BEFORE the initial select
-    if "event_id" in df.columns:
-        event_id_expr = pl.col("event_id")
-    elif "eventId" in df.columns:
-        event_id_expr = pl.col("eventId").alias("event_id")
-    else:
-        event_id_expr = pl.lit(None).cast(pl.Utf8).alias("event_id")
-
-    # 2. Normalize data column to Utf8 (handles dict-valued data)
+    # 1. Normalize data column to Utf8 (handles dict-valued data)
     df = _normalize_data_column(df)
 
-    # 3. Build base columns
+    # 2. Build base columns
     base_exprs = [
         pl.col("type"),
         pl.col("type").str.split(".").list.last().alias("status_subtype"),
@@ -91,10 +83,9 @@ def flatten_events(df: pl.DataFrame) -> pl.DataFrame:
         .dt.date()
         .alias("event_date"),
         pl.col("traceId").alias("trace_id"),
-        event_id_expr,
     ]
 
-    # 4. Extract scalar fields from JSON via json_path_match (no Python loop)
+    # 3. Extract scalar fields from JSON via json_path_match (no Python loop)
     data_col = pl.col("data")
 
     # Fields before attachments (matches FLATTENED_SCHEMA order)
@@ -105,7 +96,7 @@ def flatten_events(df: pl.DataFrame) -> pl.DataFrame:
         and not alias.startswith("contact_")
     ]
 
-    # 5. Extract attachments: parse as list, filter nulls/empties, join with comma
+    # 4. Extract attachments: parse as list, filter nulls/empties, join with comma
     attachments_raw = (
         data_col.str.json_decode(_ATTACHMENTS_DTYPE)
         .struct.field("attachments")
@@ -128,10 +119,10 @@ def flatten_events(df: pl.DataFrame) -> pl.DataFrame:
         or alias.startswith("contact_")
     ]
 
-    # 6. Raw JSON column (full original row serialized from source columns)
+    # 5. Raw JSON column (full original row serialized from source columns)
     raw_json_col = df.select(pl.struct(pl.all()).struct.json_encode().alias("raw_json"))
 
-    # 7. Build extracted columns, then combine with raw_json
+    # 6. Build extracted columns, then combine with raw_json
     extracted = df.select(
         base_exprs
         + pre_attach_exprs
@@ -152,7 +143,6 @@ FLATTENED_SCHEMA = {
     "ingested_at": pl.Datetime(time_zone="UTC"),
     "event_date": pl.Date,
     "trace_id": pl.Utf8,
-    "event_id": pl.Utf8,
     "description": pl.Utf8,
     "assignment_id": pl.Utf8,
     "original_assignment_id": pl.Utf8,

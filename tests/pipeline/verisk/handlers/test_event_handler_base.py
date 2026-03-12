@@ -27,7 +27,6 @@ def clean_registry():
 
 def _make_task(status_subtype: str) -> XACTEnrichmentTask:
     return XACTEnrichmentTask(
-        event_id="evt-001",
         trace_id="trace-001",
         event_type="verisk",
         status_subtype=status_subtype,

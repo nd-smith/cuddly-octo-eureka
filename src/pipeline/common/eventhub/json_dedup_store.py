@@ -4,7 +4,7 @@ Stores dedup keys as individual JSON files on the local filesystem.
 Mirrors the blob storage structure for testing without Azure dependencies.
 
 Storage structure:
-    storage_path/worker-name/key.json -> {"event_id": "...", "timestamp": 1234567890}
+    storage_path/worker-name/key.json -> {"timestamp": 1234567890}
 
 Example:
     ./data/eventhub-dedup-cache/verisk-event-ingester/trace_abc123.json

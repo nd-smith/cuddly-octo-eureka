@@ -168,7 +168,7 @@ async def test_delta_writer_integration():
     # Verify writer was initialized with correct params
     assert writer._timestamp_column == "created_at"
     assert writer._partition_column == "event_date"
-    assert writer._z_order_columns == ["event_date", "trace_id", "event_id", "type"]
+    assert writer._z_order_columns == ["event_date", "trace_id", "type"]
 
     # Write a raw event
     raw_event = {

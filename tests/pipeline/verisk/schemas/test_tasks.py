@@ -10,7 +10,6 @@ from pipeline.verisk.schemas.tasks import DownloadTaskMessage, XACTEnrichmentTas
 
 def _make_enrichment_task(**overrides):
     defaults = {
-        "event_id": "evt_1",
         "trace_id": "t1",
         "event_type": "xact",
         "status_subtype": "documentsReceived",
@@ -49,19 +48,18 @@ def _make_download_task(**overrides):
 class TestXACTEnrichmentTask:
     def test_valid_creation(self):
         task = _make_enrichment_task()
-        assert task.event_id == "evt_1"
         assert task.retry_count == 0
         assert task.estimate_version is None
         assert task.attachments == []
         assert task.metadata is None
 
     def test_strips_whitespace(self):
-        task = _make_enrichment_task(event_id="  evt_1  ")
-        assert task.event_id == "evt_1"
+        task = _make_enrichment_task(trace_id="  t1  ")
+        assert task.trace_id == "t1"
 
     def test_empty_required_field_rejected(self):
         with pytest.raises(ValidationError):
-            _make_enrichment_task(event_id="")
+            _make_enrichment_task(trace_id="")
 
     def test_negative_retry_count_rejected(self):
         with pytest.raises(ValidationError):
