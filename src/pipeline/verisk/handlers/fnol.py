@@ -17,6 +17,7 @@ from pipeline.verisk.handlers.base import (
     FileHandlerSideEffect,
     register_handler,
 )
+from pipeline.verisk.handlers.contentspal_router import build_contentspal_side_effect
 from pipeline.verisk.schemas.fnol import FnolMessage
 from pipeline.verisk.schemas.tasks import DownloadTaskMessage
 
@@ -63,19 +64,27 @@ class FnolXactdocXmlHandler(DownloadFileHandler):
                 parsed_data = await asyncio.to_thread(
                     _parse_fnol_xactdoc_sync, file_path
                 )
+                merged = {**parsed_data, "blob_url": f"{task.blob_path}/{file_path.name}"}
                 from datetime import UTC, datetime
-                side_effect = FileHandlerSideEffect(
-                    topic_key="fnol",
-                    message=FnolMessage.from_handler_data(
-                        task_message=task,
-                        parsed_data={**parsed_data, "blob_url": f"{task.blob_path}/{file_path.name}"},
-                        produced_at=datetime.now(UTC),
+                side_effects = [
+                    FileHandlerSideEffect(
+                        topic_key="fnol",
+                        message=FnolMessage.from_handler_data(
+                            task_message=task,
+                            parsed_data=merged,
+                            produced_at=datetime.now(UTC),
+                        ),
                     ),
-                )
+                ]
+
+                contentspal_se = build_contentspal_side_effect(task, merged)
+                if contentspal_se is not None:
+                    side_effects.append(contentspal_se)
             else:
                 # No specific parser for this XML file; nothing to extract.
                 parsed_data = {}
-                side_effect = None
+                merged = {}
+                side_effects = []
 
             logger.info(
                 "Download file handler complete",
@@ -83,14 +92,14 @@ class FnolXactdocXmlHandler(DownloadFileHandler):
                     "handler_name": self.name,
                     "attachment_filename": file_path.name,
                     "parsed_fields": list(parsed_data.keys()),
-                    "has_side_effect": side_effect is not None,
+                    "has_side_effect": len(side_effects) > 0,
                     **extract_log_context(task),
                 },
             )
             return FileHandlerResult(
                 success=True,
                 parsed_data={**parsed_data, "blob_url": f"{task.blob_path}/{file_path.name}"},
-                side_effect=side_effect,
+                side_effects=side_effects,
             )
 
         except Exception as e:

@@ -41,7 +41,7 @@ class FileHandlerResult:
 
     success: bool
     parsed_data: dict[str, Any] = field(default_factory=dict)
-    side_effect: FileHandlerSideEffect | None = None
+    side_effects: list[FileHandlerSideEffect] = field(default_factory=list)
     error: str | None = None
 
 
@@ -223,19 +223,19 @@ class FileHandlerRunner:
             )
             return {}
 
-        if result.side_effect is not None:
-            se = result.side_effect
-            producer = await self._get_producer(se.topic_key)
-            await producer.send(value=se.message, key=task.trace_id)
-            logger.info(
-                "Produced handler side-effect message",
-                extra={
-                    "handler_name": handler.name,
-                    "topic_key": se.topic_key,
-                    "eventhub_name": producer.eventhub_name,
-                    **extract_log_context(task),
-                },
-            )
+        if result.side_effects:
+            for se in result.side_effects:
+                producer = await self._get_producer(se.topic_key)
+                await producer.send(value=se.message, key=task.trace_id)
+                logger.info(
+                    "Produced handler side-effect message",
+                    extra={
+                        "handler_name": handler.name,
+                        "topic_key": se.topic_key,
+                        "eventhub_name": producer.eventhub_name,
+                        **extract_log_context(task),
+                    },
+                )
         else:
             logger.debug(
                 "Download file handler produced no side-effect",

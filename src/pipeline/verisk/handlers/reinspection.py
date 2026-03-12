@@ -86,32 +86,36 @@ class EstimatePackageXmlHandler(DownloadFileHandler):
                     _parse_reinspection_form_sync, file_path
                 )
                 from datetime import UTC, datetime
-                side_effect = FileHandlerSideEffect(
-                    topic_key="reinspections",
-                    message=ReinspectionMessage.from_handler_data(
-                        task_message=task,
-                        parsed_data={**parsed_data, "blob_url": f"{task.blob_path}/{file_path.name}"},
-                        produced_at=datetime.now(UTC),
+                side_effects = [
+                    FileHandlerSideEffect(
+                        topic_key="reinspections",
+                        message=ReinspectionMessage.from_handler_data(
+                            task_message=task,
+                            parsed_data={**parsed_data, "blob_url": f"{task.blob_path}/{file_path.name}"},
+                            produced_at=datetime.now(UTC),
+                        ),
                     ),
-                )
+                ]
             elif attachment_filename.endswith(GRD_FILENAME_SUFFIX):
                 parsed_data = _parse_grd_filename(file_path.name)
                 parsed_data["generic_roughdraft_data"] = await asyncio.to_thread(
                     file_path.read_text, encoding="utf-8"
                 )
                 from datetime import UTC, datetime
-                side_effect = FileHandlerSideEffect(
-                    topic_key="verisk_grd",
-                    message=GrdMessage.from_handler_data(
-                        task_message=task,
-                        parsed_data={**parsed_data, "blob_url": f"{task.blob_path}/{file_path.name}"},
-                        produced_at=datetime.now(UTC),
+                side_effects = [
+                    FileHandlerSideEffect(
+                        topic_key="verisk_grd",
+                        message=GrdMessage.from_handler_data(
+                            task_message=task,
+                            parsed_data={**parsed_data, "blob_url": f"{task.blob_path}/{file_path.name}"},
+                            produced_at=datetime.now(UTC),
+                        ),
                     ),
-                )
+                ]
             else:
                 # No specific parser for this XML file; nothing to extract.
                 parsed_data = {}
-                side_effect = None
+                side_effects = []
 
             logger.info(
                 "Download file handler complete",
@@ -125,7 +129,7 @@ class EstimatePackageXmlHandler(DownloadFileHandler):
             return FileHandlerResult(
                 success=True,
                 parsed_data={**parsed_data, "blob_url": f"{task.blob_path}/{file_path.name}"},
-                side_effect=side_effect,
+                side_effects=side_effects,
             )
 
         except Exception as e:

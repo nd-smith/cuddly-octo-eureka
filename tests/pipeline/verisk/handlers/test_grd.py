@@ -73,8 +73,8 @@ class TestGrdHandler:
         handler = EstimatePackageXmlHandler()
         result = await handler.handle(_make_task(), xml_file)
 
-        assert result.side_effect is not None
-        assert result.side_effect.topic_key == "verisk_grd"
+        assert len(result.side_effects) > 0
+        assert result.side_effects[0].topic_key == "verisk_grd"
 
     @pytest.mark.asyncio
     async def test_side_effect_message_fields(self, tmp_path):
@@ -84,7 +84,7 @@ class TestGrdHandler:
         handler = EstimatePackageXmlHandler()
         result = await handler.handle(_make_task(), xml_file)
 
-        msg = result.side_effect.message
+        msg = result.side_effects[0].message
         assert msg.assignment_id == "055379P"
         assert msg.version == "2"
         assert msg.trace_id == "trace-grd-001"
@@ -99,7 +99,7 @@ class TestGrdHandler:
         result = await handler.handle(_make_task(), xml_file)
 
         assert result.success is True
-        assert result.side_effect is None
+        assert len(result.side_effects) == 0
         assert result.parsed_data == {
             "blob_url": "estimatePackageReceived/055379P/trace-grd-001/other_attachment.xml"
         }
@@ -118,8 +118,8 @@ class TestGrdHandler:
         result = await handler.handle(_make_task(), xml_file)
 
         assert result.success is True
-        assert result.side_effect is not None
-        assert result.side_effect.topic_key == "reinspections"
+        assert len(result.side_effects) > 0
+        assert result.side_effects[0].topic_key == "reinspections"
 
     @pytest.mark.asyncio
     async def test_grd_filename_single_underscore(self, tmp_path):
