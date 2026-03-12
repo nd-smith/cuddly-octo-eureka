@@ -257,6 +257,8 @@ eventhub:
       eventhub_name: ${EVENTHUB_VERISK_XACT_STATUS_NAME:-verisk_status}
     verisk_notes:
       eventhub_name: ${EVENTHUB_VERISK_NOTES_NAME:-verisk_notes}
+    contentspal_delivery:
+      eventhub_name: ${EVENTHUB_VERISK_CONTENTSPAL_DELIVERY_NAME:-verisk_contentspal_delivery}
 
   # ---------------------------------------------------------------------------
   # ClaimX Domain

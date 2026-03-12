@@ -159,7 +159,7 @@ class TestFnolXactdocXmlHandler:
         result = await handler.handle(_make_task(), xml_file)
 
         assert result.success is True
-        assert result.side_effect.message.is_reassignment is False
+        assert result.side_effects[0].message.is_reassignment is False
 
     @pytest.mark.asyncio
     async def test_is_reassignment_true_when_transaction_ids_differ(self, tmp_path):
@@ -173,7 +173,7 @@ class TestFnolXactdocXmlHandler:
         result = await handler.handle(_make_task(), xml_file)
 
         assert result.success is True
-        assert result.side_effect.message.is_reassignment is True
+        assert result.side_effects[0].message.is_reassignment is True
 
     @pytest.mark.asyncio
     async def test_is_reassignment_false_when_original_transaction_id_absent(self, tmp_path):
@@ -185,7 +185,7 @@ class TestFnolXactdocXmlHandler:
         result = await handler.handle(_make_task(), xml_file)
 
         assert result.success is True
-        assert result.side_effect.message.is_reassignment is False
+        assert result.side_effects[0].message.is_reassignment is False
 
     @pytest.mark.asyncio
     async def test_side_effect_topic_key(self, tmp_path):
@@ -195,8 +195,8 @@ class TestFnolXactdocXmlHandler:
         handler = FnolXactdocXmlHandler()
         result = await handler.handle(_make_task(), xml_file)
 
-        assert result.side_effect is not None
-        assert result.side_effect.topic_key == "fnol"
+        assert len(result.side_effects) > 0
+        assert result.side_effects[0].topic_key == "fnol"
 
     @pytest.mark.asyncio
     async def test_non_fnol_xml_passes_through(self, tmp_path):
@@ -207,7 +207,7 @@ class TestFnolXactdocXmlHandler:
         result = await handler.handle(_make_task(), xml_file)
 
         assert result.success is True
-        assert result.side_effect is None
+        assert len(result.side_effects) == 0
         assert result.parsed_data == {"blob_url": "firstNoticeOfLossReceived/A001/trace-001/other_attachment.xml"}
 
     @pytest.mark.asyncio
