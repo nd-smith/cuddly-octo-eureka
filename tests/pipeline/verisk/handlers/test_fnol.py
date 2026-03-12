@@ -21,7 +21,6 @@ def clean_registry():
 
 def _make_task(status_subtype: str = "firstNoticeOfLossReceived", file_type: str = "xml") -> DownloadTaskMessage:
     return DownloadTaskMessage(
-        event_id="evt-001",
         media_id="media-001",
         trace_id="trace-001",
         attachment_url="https://example.com/A001_FNOL_XACTDOC.XML",

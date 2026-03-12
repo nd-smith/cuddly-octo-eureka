@@ -66,11 +66,6 @@ class EventMessage(BaseModel):
         min_length=1,
         alias="traceId",
     )
-    event_id: str | None = Field(
-        default=None,
-        description="Unique event ID generated during ingestion",
-        alias="eventId",
-    )
     data: str = Field(..., description="Raw JSON string with nested event data")
 
     @field_serializer("data")
@@ -197,7 +192,6 @@ class EventMessage(BaseModel):
             version=version,
             utcDateTime=str(row.get("utcDateTime", "")),
             traceId=row.get("traceId", row.get("trace_id", "")),
-            eventId=row.get("eventId", row.get("event_id")),
             data=data,
         )
 

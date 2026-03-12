@@ -72,11 +72,6 @@ class EventIngesterWorker:
     # Using a fixed namespace ensures the same trace_id + url always yields the same media_id
     MEDIA_ID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "http://nsmkdvPipe/media_id")
 
-    # Namespace for generating deterministic event_ids (UUID5)
-    # Using a fixed namespace ensures the same trace_id always yields the same event_id
-    # This provides replayability and consistent tracking across the pipeline
-    EVENT_ID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "http://nsmkdvPipe/event_id")
-
     def __init__(
         self,
         config: MessageConfig,
@@ -115,8 +110,8 @@ class EventIngesterWorker:
         self._dedup_enabled = True
 
         # Hybrid dedup: in-memory cache (fast path) + blob storage (persistent)
-        # OrderedDict for O(1) LRU eviction: trace_id -> (event_id, timestamp)
-        self._dedup_cache: OrderedDict[str, tuple[str, float]] = OrderedDict()
+        # OrderedDict for O(1) LRU eviction: trace_id -> timestamp
+        self._dedup_cache: OrderedDict[str, float] = OrderedDict()
         self._dedup_cache_ttl_seconds = 86400  # 24 hours
         self._dedup_cache_max_size = 500_000  # ~10MB memory for 500k entries
 
@@ -317,7 +312,7 @@ class EventIngesterWorker:
                 self._records_succeeded += len(enrichment_tasks)
             except Exception as e:
                 # Roll back dedup marks — messages will be redelivered
-                for trace_id, _ in processed_trace_ids:
+                for trace_id in processed_trace_ids:
                     self._dedup_cache.pop(trace_id, None)
 
                 record_processing_error(
@@ -362,7 +357,7 @@ class EventIngesterWorker:
         """Check memory cache for duplicate. Returns True if duplicate found."""
         if trace_id not in self._dedup_cache:
             return False
-        cached_event_id, cached_time = self._dedup_cache[trace_id]
+        cached_time = self._dedup_cache[trace_id]
         if now - cached_time < self._dedup_cache_ttl_seconds:
             self._dedup_cache.move_to_end(trace_id)
             self._dedup_memory_hits += 1
@@ -388,13 +383,13 @@ class EventIngesterWorker:
 
     async def _parse_and_dedup_events(
         self, records: list[PipelineMessage],
-    ) -> tuple[list[tuple[EventMessage, str]], dict[str, list[str]], list[tuple[PipelineMessage, Exception]]]:
+    ) -> tuple[list[EventMessage], dict[str, list[str]], list[tuple[PipelineMessage, Exception]]]:
         """Parse records, deduplicate via memory cache and blob storage.
 
-        Returns non-duplicate (event, event_id) pairs, dedup diagnostic counts,
+        Returns non-duplicate events, dedup diagnostic counts,
         and permanent failures (unparseable messages) for DLQ routing.
         """
-        parsed_events: list[tuple[EventMessage, str]] = []
+        parsed_events: list[EventMessage] = []
         permanent_failures: list[tuple[PipelineMessage, Exception]] = []
         seen_in_batch: set[str] = set()
         dedup_counts: dict[str, list[str]] = {
@@ -423,15 +418,12 @@ class EventIngesterWorker:
                 permanent_failures.append((record, e))
                 continue
 
-            event_id = str(uuid.uuid5(self.EVENT_ID_NAMESPACE, event.trace_id))
-            event.event_id = event_id
-
             if self._dedup_enabled and self._check_dedup(
                 event.trace_id, seen_in_batch, now, dedup_counts,
             ):
                 continue
 
-            parsed_events.append((event, event_id))
+            parsed_events.append(event)
 
         # Blob dedup removed from hot path — it was the primary throughput
         # bottleneck (~200ms+ of HTTP round-trips per batch). The memory cache
@@ -443,16 +435,16 @@ class EventIngesterWorker:
         return parsed_events, dedup_counts, permanent_failures
 
     def _build_enrichment_tasks(
-        self, parsed_events: list[tuple[EventMessage, str]],
-    ) -> tuple[list[tuple[str, bytes]], list[tuple[str, str]]]:
+        self, parsed_events: list[EventMessage],
+    ) -> tuple[list[tuple[str, bytes]], list[str]]:
         """Create enrichment tasks from validated, non-duplicate events.
 
         Returns pre-serialized bytes to avoid CPU work during the AMQP send path.
         """
         enrichment_tasks: list[tuple[str, bytes]] = []
-        processed_trace_ids: list[tuple[str, str]] = []
+        processed_trace_ids: list[str] = []
 
-        for event, event_id in parsed_events:
+        for event in parsed_events:
             assignment_id = event.assignment_id
             if not assignment_id:
                 self._records_skipped += 1
@@ -468,7 +460,6 @@ class EventIngesterWorker:
             original_timestamp = datetime.fromisoformat(event.utc_datetime.replace("Z", "+00:00"))
 
             enrichment_task = XACTEnrichmentTask(
-                event_id=event_id,
                 trace_id=event.trace_id,
                 event_type=self.domain,
                 status_subtype=event.status_subtype,
@@ -482,7 +473,7 @@ class EventIngesterWorker:
             )
 
             enrichment_tasks.append((event.trace_id, enrichment_task.model_dump_json().encode("utf-8")))
-            processed_trace_ids.append((event.trace_id, event_id))
+            processed_trace_ids.append(event.trace_id)
 
             logger.debug(
                 "Event ingested",
@@ -494,7 +485,7 @@ class EventIngesterWorker:
                 },
             )
             if self._dedup_enabled:
-                self._mark_processed(event.trace_id, event_id)
+                self._mark_processed(event.trace_id)
 
         return enrichment_tasks, processed_trace_ids
 
@@ -546,8 +537,8 @@ class EventIngesterWorker:
         self._cycle_offset_end_ts = None
         return msg, extra
 
-    def _mark_processed(self, trace_id: str, event_id: str) -> None:
-        """Add trace_id -> event_id mapping to memory cache, fire-and-forget to blob."""
+    def _mark_processed(self, trace_id: str) -> None:
+        """Add trace_id to memory cache, fire-and-forget to blob."""
         now = time.time()
 
         # If memory cache is full, evict oldest entries (LRU via OrderedDict)
@@ -565,23 +556,23 @@ class EventIngesterWorker:
             )
 
         # Add to memory cache (at end for LRU ordering)
-        self._dedup_cache[trace_id] = (event_id, now)
+        self._dedup_cache[trace_id] = now
         self._dedup_cache.move_to_end(trace_id)
 
         # Persist to blob storage — truly fire-and-forget (don't block on HTTP)
         if self._dedup_store:
-            task = asyncio.create_task(self._persist_dedup_to_blob(trace_id, event_id, now))
+            task = asyncio.create_task(self._persist_dedup_to_blob(trace_id, now))
             self._blob_write_tasks.add(task)
             task.add_done_callback(self._blob_write_tasks.discard)
 
-    async def _persist_dedup_to_blob(self, trace_id: str, event_id: str, timestamp: float) -> None:
+    async def _persist_dedup_to_blob(self, trace_id: str, timestamp: float) -> None:
         """Fire-and-forget blob persistence for dedup markers."""
         async with self._blob_semaphore:
             try:
                 await self._dedup_store.mark_processed(
                     self._dedup_worker_name,
                     trace_id,
-                    {"event_id": event_id, "timestamp": timestamp},
+                    {"timestamp": timestamp},
                 )
             except Exception as e:
                 logger.warning(
@@ -601,7 +592,7 @@ class EventIngesterWorker:
                 min(self._dedup_cache_max_size, self._PREWARM_MAX_KEYS),
             )
             for trace_id, blob_ts in keys:
-                self._dedup_cache[trace_id] = ("", blob_ts)
+                self._dedup_cache[trace_id] = blob_ts
             logger.info(
                 "Pre-warmed dedup cache from blob storage",
                 extra={
@@ -619,7 +610,7 @@ class EventIngesterWorker:
         now = time.time()
         expired_keys = [
             trace_id
-            for trace_id, (_, cached_time) in self._dedup_cache.items()
+            for trace_id, cached_time in self._dedup_cache.items()
             if now - cached_time >= self._dedup_cache_ttl_seconds
         ]
 

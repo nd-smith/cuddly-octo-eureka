@@ -22,19 +22,15 @@ def _make_event(
     trace_id: str = "trace-001",
     utc_datetime: str = "2024-01-15T10:30:00Z",
     version: str = "1",
-    event_id: str | None = None,
 ) -> dict:
     """Build a raw event dict matching Kafka message format."""
-    d = {
+    return {
         "type": event_type,
         "version": version,
         "utcDateTime": utc_datetime,
         "traceId": trace_id,
         "data": data,
     }
-    if event_id is not None:
-        d["eventId"] = event_id
-    return d
 
 
 class TestFlattenEventsColumns:
@@ -86,16 +82,6 @@ class TestFlattenEventsBaseFields:
         df = pl.DataFrame([_make_event(utc_datetime="2024-06-15T08:30:00Z")])
         result = flatten_events(df)
         assert result["event_date"][0] == date(2024, 6, 15)
-
-    def test_event_id_from_eventId_column(self):
-        df = pl.DataFrame([_make_event(event_id="evt-001")])
-        result = flatten_events(df)
-        assert result["event_id"][0] == "evt-001"
-
-    def test_event_id_null_when_absent(self):
-        df = pl.DataFrame([_make_event()])
-        result = flatten_events(df)
-        assert result["event_id"][0] is None
 
 
 class TestFlattenEventsSimpleFields:

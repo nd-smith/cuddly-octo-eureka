@@ -21,7 +21,6 @@ def clean_registry():
 
 def _make_task(status_subtype: str = "estimatePackageReceived", file_type: str = "xml") -> DownloadTaskMessage:
     return DownloadTaskMessage(
-        event_id="evt-grd-001",
         media_id="media-grd-001",
         trace_id="trace-grd-001",
         attachment_url="https://example.com/055379P_2__GENERIC_ROUGHDRAFT.xml",

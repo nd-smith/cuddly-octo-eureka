@@ -19,7 +19,6 @@ SAMPLE_DATA = {
 
 def _make_task() -> XACTEnrichmentTask:
     return XACTEnrichmentTask(
-        event_id="evt-001",
         trace_id="trace-001",
         event_type="verisk",
         status_subtype="assignmentNoteAdded",

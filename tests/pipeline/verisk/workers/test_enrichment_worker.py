@@ -51,7 +51,6 @@ def mock_plugin_registry():
 def sample_enrichment_task():
     """Sample enrichment task for testing."""
     return XACTEnrichmentTask(
-        event_id="evt-123",
         trace_id="trace-456",
         event_type="xact",
         status_subtype="documentsReceived",
@@ -240,7 +239,6 @@ class TestXACTEnrichmentWorkerMessageProcessing:
         assert worker._process_single_task.called
         task = worker._process_single_task.call_args[0][0]
         assert isinstance(task, XACTEnrichmentTask)
-        assert task.event_id == "evt-123"
         assert task.event_type == "xact"
         assert task.status_subtype == "documentsReceived"
         assert task.assignment_id == "assign-789"
@@ -341,7 +339,6 @@ class TestXACTEnrichmentWorkerDownloadTasks:
 
         # Create task with no attachments
         task = XACTEnrichmentTask(
-            event_id="evt-123",
             trace_id="trace-456",
             event_type="xact",
             status_subtype="documentsReceived",
@@ -370,7 +367,6 @@ class TestXACTEnrichmentWorkerIsReinspection:
 
     def _make_task(self, status_subtype: str, attachments: list[str]) -> XACTEnrichmentTask:
         return XACTEnrichmentTask(
-            event_id="evt-001",
             trace_id="trace-001",
             event_type="xact",
             status_subtype=status_subtype,

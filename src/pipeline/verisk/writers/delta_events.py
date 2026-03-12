@@ -67,7 +67,7 @@ class DeltaEventsWriter(BaseDeltaWriter):
             table_path=table_path,
             timestamp_column="created_at",
             partition_column="event_date",
-            z_order_columns=["event_date", "trace_id", "event_id", "type"],
+            z_order_columns=["event_date", "trace_id", "type"],
         )
 
     async def write_raw_events(
