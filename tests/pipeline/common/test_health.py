@@ -479,3 +479,104 @@ class TestHealthCheckServerProperties:
         server = HealthCheckServer(port=8080, worker_name="test-worker", enabled=False)
 
         assert server.actual_port is None
+
+
+class TestHealthCheckServerHeartbeat:
+    """Test heartbeat-based liveness detection."""
+
+    def test_record_heartbeat_updates_last_heartbeat(self):
+        """record_heartbeat() stores a monotonic timestamp."""
+        server = HealthCheckServer(port=8080, worker_name="test-worker")
+
+        assert server._last_heartbeat is None
+
+        server.record_heartbeat()
+
+        assert server._last_heartbeat is not None
+
+    @pytest.mark.asyncio
+    async def test_liveness_returns_200_with_fresh_heartbeat(self):
+        """Liveness returns 200 when heartbeat is fresh."""
+        server = HealthCheckServer(port=0, worker_name="test-worker", heartbeat_timeout_seconds=60.0)
+        await server.start()
+
+        try:
+            server.record_heartbeat()
+
+            async with (
+                aiohttp.ClientSession() as session,
+                session.get(f"http://localhost:{server.actual_port}/health/live") as resp,
+            ):
+                assert resp.status == 200
+                data = await resp.json()
+                assert data["status"] == "alive"
+
+        finally:
+            await server.stop()
+
+    @pytest.mark.asyncio
+    async def test_liveness_returns_503_with_stale_heartbeat(self):
+        """Liveness returns 503 when heartbeat exceeds timeout."""
+        import time as _time
+
+        server = HealthCheckServer(
+            port=0, worker_name="test-worker", heartbeat_timeout_seconds=0.1,
+        )
+        await server.start()
+
+        try:
+            server.record_heartbeat()
+            # Wait for the heartbeat to go stale
+            _time.sleep(0.2)
+
+            async with (
+                aiohttp.ClientSession() as session,
+                session.get(f"http://localhost:{server.actual_port}/health/live") as resp,
+            ):
+                assert resp.status == 503
+                data = await resp.json()
+                assert data["status"] == "unhealthy"
+                assert data["reason"] == "event_loop_stale"
+
+        finally:
+            await server.stop()
+
+    @pytest.mark.asyncio
+    async def test_liveness_returns_200_when_no_heartbeat_recorded(self):
+        """Liveness returns 200 when no heartbeat has been recorded yet (startup)."""
+        server = HealthCheckServer(port=0, worker_name="test-worker", heartbeat_timeout_seconds=60.0)
+        await server.start()
+
+        try:
+            # No heartbeat recorded yet
+            async with (
+                aiohttp.ClientSession() as session,
+                session.get(f"http://localhost:{server.actual_port}/health/live") as resp,
+            ):
+                assert resp.status == 200
+
+        finally:
+            await server.stop()
+
+    @pytest.mark.asyncio
+    async def test_liveness_skips_heartbeat_check_when_timeout_zero(self):
+        """Liveness skips heartbeat check when timeout is 0 (disabled)."""
+        import time as _time
+
+        server = HealthCheckServer(
+            port=0, worker_name="test-worker", heartbeat_timeout_seconds=0,
+        )
+        await server.start()
+
+        try:
+            server.record_heartbeat()
+            _time.sleep(0.1)
+
+            async with (
+                aiohttp.ClientSession() as session,
+                session.get(f"http://localhost:{server.actual_port}/health/live") as resp,
+            ):
+                assert resp.status == 200
+
+        finally:
+            await server.stop()

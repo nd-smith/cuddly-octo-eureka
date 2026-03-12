@@ -547,10 +547,19 @@ class EventHubBatchConsumer:
         """Background task to flush batches that hit timeout threshold.
 
         Checks every 25ms for batches that have exceeded batch_timeout_ms.
+        Also records a heartbeat on each iteration so the health server
+        knows the event loop is responsive even during long batch processing.
         """
         while self._running:
             try:
                 await asyncio.sleep(0.025)  # Check every 25ms
+
+                # Record heartbeat to prove the event loop is alive.
+                # on_event only fires when new messages arrive or on idle
+                # wakeups, so during long _process_batch calls no heartbeat
+                # would be recorded without this.
+                if self._health_server is not None:
+                    self._health_server.record_heartbeat()
 
                 current_time = time.time()
                 for partition_id in list(self._batch_buffers.keys()):

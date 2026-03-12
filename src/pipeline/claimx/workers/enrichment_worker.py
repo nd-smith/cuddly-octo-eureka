@@ -402,6 +402,7 @@ class ClaimXEnrichmentWorker:
                     batch_timeout_ms=self.batch_timeout_ms,
                     instance_id=self.instance_id,
                 ),
+                health_server=self.health_server,
             )
 
             self.health_server.set_ready(
