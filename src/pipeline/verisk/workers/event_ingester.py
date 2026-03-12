@@ -3,7 +3,7 @@ Event Ingester Worker - Consumes events and produces enrichment tasks.
 
 Entry point to the enrichment and download pipeline:
 1. Consumes EventMessage from events.raw topic
-2. Deduplicates via in-memory LRU cache (pre-warmed from blob on startup)
+2. Deduplicates via in-memory LRU cache (downstream is idempotent via deterministic event_ids)
 3. Creates XACTEnrichmentTask (with raw_event payload) for each event
 4. Produces to enrichment.pending topic for plugin execution
 
@@ -31,12 +31,7 @@ from pydantic import ValidationError
 from config.config import MessageConfig
 from core.logging.periodic_logger import PeriodicStatsLogger
 from core.logging.utilities import format_cycle_output
-from pipeline.common.eventhub.dedup_store import (
-    DedupStoreProtocol,
-    close_dedup_store,
-    get_dedup_store,
-    is_dedup_enabled,
-)
+from pipeline.common.eventhub.dedup_store import is_dedup_enabled
 from pipeline.common.health import HealthCheckServer
 from pipeline.common.metrics import (
     message_processing_duration_seconds,
@@ -113,15 +108,11 @@ class EventIngesterWorker:
         # Dedup bypass flag (checked at start from config)
         self._dedup_enabled = True
 
-        # In-memory dedup cache, pre-warmed from blob storage on startup
+        # In-memory dedup cache (cold start on deploy, downstream is idempotent)
         # OrderedDict for O(1) LRU eviction: trace_id -> (event_id, timestamp)
         self._dedup_cache: OrderedDict[str, tuple[str, float]] = OrderedDict()
         self._dedup_cache_ttl_seconds = 86400  # 24 hours
         self._dedup_cache_max_size = 500_000  # ~10MB memory for 500k entries
-
-        # Blob dedup store (read-only, used for startup prewarm only)
-        self._dedup_store: DedupStoreProtocol | None = None
-        self._dedup_worker_name = "verisk-event-ingester"
         self._dedup_cleanup_task: asyncio.Task | None = None
 
         # Health check server
@@ -162,23 +153,10 @@ class EventIngesterWorker:
         initialize_worker_telemetry(self.domain, "event-ingester")
 
         try:
-            # Initialize dedup subsystem
+            # Initialize dedup subsystem (memory-only, downstream is idempotent)
             self._dedup_enabled = is_dedup_enabled()
             if not self._dedup_enabled:
                 logger.info("Dedup disabled via config")
-            else:
-                self._dedup_store = await get_dedup_store()
-                if self._dedup_store:
-                    logger.info("Persistent dedup store enabled")
-                    try:
-                        await asyncio.wait_for(self._prewarm_dedup_cache(), timeout=30.0)
-                    except asyncio.TimeoutError:
-                        logger.warning(
-                            "Dedup cache prewarm timed out — continuing with empty cache",
-                            extra={"timeout_seconds": 30},
-                        )
-                else:
-                    logger.info("Persistent dedup store not configured - using memory-only deduplication")
 
             # Start producer first (uses transport factory for Event Hub support)
             self.producer = create_producer(
@@ -246,7 +224,6 @@ class EventIngesterWorker:
         await self._close_resource("dedup cleanup task", self._cancel_dedup_cleanup)
         await self._close_resource("consumer", self._stop_consumer, clear="consumer")
         await self._close_resource("producer", self._stop_producer, clear="producer")
-        await self._close_resource("dedup store", close_dedup_store)
         await self._close_resource("health server", self.health_server.stop)
 
         logger.info("EventIngesterWorker stopped successfully")
@@ -550,32 +527,6 @@ class EventIngesterWorker:
         # Add to memory cache (at end for LRU ordering)
         self._dedup_cache[trace_id] = (event_id, now)
         self._dedup_cache.move_to_end(trace_id)
-
-    # Prewarm cap: limit blob enumeration to avoid blocking startup
-    _PREWARM_MAX_KEYS = 10_000
-
-    async def _prewarm_dedup_cache(self) -> None:
-        """Pre-warm memory dedup cache from blob storage on startup."""
-        try:
-            keys = await self._dedup_store.list_recent_keys(
-                self._dedup_worker_name,
-                self._dedup_cache_ttl_seconds,
-                min(self._dedup_cache_max_size, self._PREWARM_MAX_KEYS),
-            )
-            for trace_id, blob_ts in keys:
-                self._dedup_cache[trace_id] = ("", blob_ts)
-            logger.info(
-                "Pre-warmed dedup cache from blob storage",
-                extra={
-                    "cache_size": len(self._dedup_cache),
-                    "keys_loaded": len(keys),
-                },
-            )
-        except Exception as e:
-            logger.warning(
-                "Failed to pre-warm dedup cache (continuing with empty cache)",
-                extra={"error": str(e)},
-            )
 
     def _cleanup_dedup_cache(self) -> None:
         now = time.time()
