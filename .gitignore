@@ -44,6 +44,9 @@ test-results/
 .env
 .env.*
 
+# uv
+uv.lock
+
 # OS files
 .DS_Store
 Thumbs.db
