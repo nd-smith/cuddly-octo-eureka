@@ -12,6 +12,35 @@ STALE_FILE_MAX_AGE_HOURS = 24
 CLEANUP_INTERVAL_SECONDS = 3600
 
 
+def _remove_empty_directories(scan_dir: Path, in_flight: set) -> int:
+    """Walk directory tree bottom-up and remove empty directories.
+
+    Skips directories whose name is in the in-flight set. Returns the
+    number of directories removed.
+    """
+    removed = 0
+    # sorted by depth descending so children are processed before parents
+    dirs = sorted(
+        (p for p in scan_dir.rglob("*") if p.is_dir()),
+        key=lambda p: len(p.parts),
+        reverse=True,
+    )
+    for d in dirs:
+        if d.name in in_flight:
+            continue
+        try:
+            if not any(d.iterdir()):
+                d.rmdir()
+                removed += 1
+                logger.debug(
+                    "Removed empty directory",
+                    extra={"directory": str(d)},
+                )
+        except OSError:
+            pass
+    return removed
+
+
 def _scan_and_remove(scan_dir: Path, in_flight: set, max_age: float) -> int:
     """Scan directory and remove stale files not in the in-flight set."""
     if not scan_dir.exists():
@@ -37,6 +66,15 @@ def _scan_and_remove(scan_dir: Path, in_flight: set, max_age: float) -> int:
                 )
         except OSError:
             pass
+
+    # Clean up empty directories left behind after file removal
+    dirs_removed = _remove_empty_directories(scan_dir, in_flight)
+    if dirs_removed:
+        logger.info(
+            "Removed empty directories during stale file cleanup",
+            extra={"directories_removed": dirs_removed},
+        )
+
     return count
 
 

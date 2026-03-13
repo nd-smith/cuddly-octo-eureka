@@ -667,7 +667,8 @@ class DownloadWorker:
 
     def _convert_to_download_task(self, task_message: DownloadTaskMessage) -> DownloadTask:
         destination_filename = Path(task_message.blob_path).name
-        temp_file = self.temp_dir / task_message.trace_id / destination_filename
+        date_prefix = datetime.now(UTC).strftime("%Y/%m/%d")
+        temp_file = self.temp_dir / date_prefix / task_message.trace_id / destination_filename
 
         return DownloadTask(
             url=task_message.attachment_url,
@@ -704,7 +705,8 @@ class DownloadWorker:
             },
         )
 
-        cache_subdir = self.cache_dir / task_message.trace_id
+        date_prefix = datetime.now(UTC).strftime("%Y/%m/%d")
+        cache_subdir = self.cache_dir / date_prefix / task_message.trace_id
         cache_subdir.mkdir(parents=True, exist_ok=True)
 
         filename = Path(task_message.blob_path).name
