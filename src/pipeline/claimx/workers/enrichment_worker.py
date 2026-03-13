@@ -119,6 +119,9 @@ class ClaimXEnrichmentWorker:
         itel_question = config.get_worker_setting(domain, "enrichment", "itel_cabinet_damage_question", default=None)
         if itel_question is not None:
             self.ITEL_CABINET_DAMAGE_QUESTION = itel_question
+        itel_extent_question = config.get_worker_setting(domain, "enrichment", "itel_damage_extent_question", default=None)
+        if itel_extent_question is not None:
+            self.ITEL_DAMAGE_EXTENT_QUESTION = itel_extent_question
 
         self.producer = None
         self.download_producer = None
@@ -304,6 +307,7 @@ class ClaimXEnrichmentWorker:
     ITEL_TASK_IDS = {32615, 24454}
     ITEL_PENDING_TOPIC = "pcesdopodappv1-itel-cabinet-pending"
     ITEL_CABINET_DAMAGE_QUESTION = "Kitchen cabinet damage present"
+    ITEL_DAMAGE_EXTENT_QUESTION = "Do damages extend past toekicks and/or side panels only?"
 
     async def _init_itel_routing(self) -> None:
         """Create producer for ITEL event routing."""
@@ -757,6 +761,32 @@ class ClaimXEnrichmentWorker:
                 return bool(export.get("text") or export.get("optionAnswer"))
         return False
 
+    @staticmethod
+    def _has_damage_extent(task_row: dict) -> bool:
+        """Check if damages extend past toekicks and/or side panels only.
+
+        Inspects _form_response_groups attached to the task_row for the
+        "Do damages extend past toekicks and/or side panels only?" question.
+        Returns True only when the answer is affirmative; returns False for
+        "No", missing question, or missing form data.
+        """
+        groups = task_row.get("_form_response_groups", [])
+        for group in groups:
+            for qa in group.get("questionAndAnswers", []):
+                q_text = (qa.get("questionText") or "").strip()
+                if q_text.lower() != ClaimXEnrichmentWorker.ITEL_DAMAGE_EXTENT_QUESTION.lower():
+                    continue
+                export = qa.get("responseAnswerExport", {})
+                answer_type = export.get("type", "")
+                if answer_type == "option":
+                    name = (export.get("optionAnswer") or {}).get("name", "")
+                    return name.lower().startswith("yes")
+                if answer_type == "text":
+                    text = (export.get("text") or "").strip().lower()
+                    return text.startswith("yes") or text == "true"
+                return bool(export.get("text") or export.get("optionAnswer"))
+        return False
+
     async def _route_itel_events(self, task, event, entity_rows) -> None:
         """Route matching task events to the ITEL cabinet pending topic (best-effort).
 
@@ -787,6 +817,17 @@ class ClaimXEnrichmentWorker:
                 if not self._has_cabinet_damage(task_row):
                     logger.info(
                         "ITEL event skipped: no cabinet damage",
+                        extra={
+                            "trace_id": task.trace_id,
+                            "task_id": task_id,
+                            "assignment_id": task_row.get("assignment_id"),
+                        },
+                    )
+                    continue
+
+                if not self._has_damage_extent(task_row):
+                    logger.info(
+                        "ITEL event skipped: damages do not extend past toekicks/side panels",
                         extra={
                             "trace_id": task.trace_id,
                             "task_id": task_id,

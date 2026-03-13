@@ -95,6 +95,68 @@ class TestHasCabinetDamage:
         assert ClaimXEnrichmentWorker._has_cabinet_damage(row) is True
 
 
+DAMAGE_EXTENT_QUESTION = "Do damages extend past toekicks and/or side panels only?"
+
+
+class TestHasDamageExtent:
+    """Tests for _has_damage_extent static method."""
+
+    def test_yes_option_returns_true(self):
+        group = _make_group(DAMAGE_EXTENT_QUESTION, "option", "Yes")
+        row = _make_task_row(groups=[group])
+        assert ClaimXEnrichmentWorker._has_damage_extent(row) is True
+
+    def test_yes_comma_variant_returns_true(self):
+        group = _make_group(DAMAGE_EXTENT_QUESTION, "option", "Yes, confirmed")
+        row = _make_task_row(groups=[group])
+        assert ClaimXEnrichmentWorker._has_damage_extent(row) is True
+
+    def test_no_option_returns_false(self):
+        group = _make_group(DAMAGE_EXTENT_QUESTION, "option", "No")
+        row = _make_task_row(groups=[group])
+        assert ClaimXEnrichmentWorker._has_damage_extent(row) is False
+
+    def test_text_yes_returns_true(self):
+        group = _make_group(DAMAGE_EXTENT_QUESTION, "text", "Yes")
+        row = _make_task_row(groups=[group])
+        assert ClaimXEnrichmentWorker._has_damage_extent(row) is True
+
+    def test_text_no_returns_false(self):
+        group = _make_group(DAMAGE_EXTENT_QUESTION, "text", "No")
+        row = _make_task_row(groups=[group])
+        assert ClaimXEnrichmentWorker._has_damage_extent(row) is False
+
+    def test_missing_form_response_groups_returns_false(self):
+        row = _make_task_row(groups=None)
+        assert ClaimXEnrichmentWorker._has_damage_extent(row) is False
+
+    def test_empty_groups_returns_false(self):
+        row = _make_task_row(groups=[])
+        assert ClaimXEnrichmentWorker._has_damage_extent(row) is False
+
+    def test_question_not_present_returns_false(self):
+        group = _make_group("Some other question", "option", "Yes")
+        row = _make_task_row(groups=[group])
+        assert ClaimXEnrichmentWorker._has_damage_extent(row) is False
+
+    def test_case_insensitive_question_match(self):
+        group = _make_group("do damages extend past toekicks and/or side panels only?", "option", "Yes")
+        row = _make_task_row(groups=[group])
+        assert ClaimXEnrichmentWorker._has_damage_extent(row) is True
+
+    def test_whitespace_trimmed_question(self):
+        group = _make_group(f"  {DAMAGE_EXTENT_QUESTION}  ", "option", "Yes")
+        row = _make_task_row(groups=[group])
+        assert ClaimXEnrichmentWorker._has_damage_extent(row) is True
+
+    def test_cabinet_damage_yes_but_extent_no_returns_false(self):
+        """Both questions in same group; extent answered No."""
+        cabinet_group = _make_group("Kitchen cabinet damage present", "option", "Yes")
+        extent_group = _make_group(DAMAGE_EXTENT_QUESTION, "option", "No")
+        row = _make_task_row(groups=[cabinet_group, extent_group])
+        assert ClaimXEnrichmentWorker._has_damage_extent(row) is False
+
+
 class TestRouteItelEventsRetrySkip:
     """Verify ITEL routing is skipped on retries to prevent duplicate events."""
 
@@ -124,10 +186,32 @@ class TestRouteItelEventsRetrySkip:
         )
         event = SimpleNamespace()
         entity_rows = SimpleNamespace(
-            tasks=[_make_task_row(groups=[_make_group("Kitchen cabinet damage present")])],
+            tasks=[_make_task_row(groups=[
+                _make_group("Kitchen cabinet damage present"),
+                _make_group(DAMAGE_EXTENT_QUESTION),
+            ])],
             projects=[],
         )
 
         await worker._route_itel_events(task, event, entity_rows)
 
         worker.itel_producer.send.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_skips_routing_when_no_damage_extent(self, worker):
+        task = SimpleNamespace(
+            trace_id="abc", retry_count=0, event_type="CUSTOM_TASK_COMPLETED",
+            project_id="1", media_ids=[],
+        )
+        event = SimpleNamespace()
+        entity_rows = SimpleNamespace(
+            tasks=[_make_task_row(groups=[
+                _make_group("Kitchen cabinet damage present", "option", "Yes"),
+                _make_group(DAMAGE_EXTENT_QUESTION, "option", "No"),
+            ])],
+            projects=[],
+        )
+
+        await worker._route_itel_events(task, event, entity_rows)
+
+        worker.itel_producer.send.assert_not_called()
