@@ -62,7 +62,7 @@ class Rule:
 def matches_fnol_xactdoc(ctx: RuleContext) -> bool:
     return (
         ctx.task.status_subtype == "firstNoticeOfLossReceived"
-        and ctx.task.file_type == "xml"
+        and ctx.task.file_type.upper() == "XML"
         and ctx.file_path is not None
         and ctx.file_path.name.upper().endswith(FNOL_FILENAME_SUFFIX)
     )
@@ -79,7 +79,7 @@ def matches_contentspal(ctx: RuleContext) -> bool:
 def matches_reinspection(ctx: RuleContext) -> bool:
     return (
         ctx.task.status_subtype == "estimatePackageReceived"
-        and ctx.task.file_type == "xml"
+        and ctx.task.file_type.upper() == "XML"
         and ctx.file_path is not None
         and ctx.file_path.name.upper() == REINSPECTION_FILENAME
     )
@@ -88,7 +88,7 @@ def matches_reinspection(ctx: RuleContext) -> bool:
 def matches_grd(ctx: RuleContext) -> bool:
     return (
         ctx.task.status_subtype == "estimatePackageReceived"
-        and ctx.task.file_type == "xml"
+        and ctx.task.file_type.upper() == "XML"
         and ctx.file_path is not None
         and ctx.file_path.name.upper().endswith(GRD_FILENAME_SUFFIX)
     )
