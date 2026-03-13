@@ -106,8 +106,12 @@ class RuleRunner:
                     break
 
         # If we still don't have a parser name but have deferred rules, try to
-        # find a parser from the deferred rules themselves for pre-parsing
-        if parser_name is None and deferred:
+        # find a parser from the deferred rules themselves for pre-parsing.
+        # Only do this when phase-1 rules matched — if no phase-1 rule matched,
+        # deferred rules (which are refinements of phase-1 rules) cannot match
+        # either, and running their parser on unrelated files causes errors
+        # (e.g. XML parse failures on non-FNOL documents).
+        if parser_name is None and deferred and phase1_matched:
             for rule in deferred:
                 if rule.name in RULE_PARSERS:
                     parser_name = rule.name
