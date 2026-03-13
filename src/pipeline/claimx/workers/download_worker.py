@@ -728,7 +728,8 @@ class ClaimXDownloadWorker:
     def _convert_to_download_task(self, task_message: ClaimXDownloadTask) -> DownloadTask:
         """Creates temp file path using media_id directory to avoid concurrent download conflicts."""
         destination_filename = Path(task_message.blob_path).name
-        temp_file = self.temp_dir / task_message.media_id / destination_filename
+        date_prefix = datetime.now(UTC).strftime("%Y/%m/%d")
+        temp_file = self.temp_dir / date_prefix / task_message.media_id / destination_filename
 
         return DownloadTask(
             url=task_message.download_url,
@@ -854,7 +855,8 @@ class ClaimXDownloadWorker:
             },
         )
 
-        cache_subdir = self.cache_dir / task_message.media_id
+        date_prefix = datetime.now(UTC).strftime("%Y/%m/%d")
+        cache_subdir = self.cache_dir / date_prefix / task_message.media_id
         cache_subdir.mkdir(parents=True, exist_ok=True)
 
         filename = Path(task_message.blob_path).name
