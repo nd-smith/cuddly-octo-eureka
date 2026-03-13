@@ -162,6 +162,27 @@ class TestRuleRunnerDownload:
         assert len(producers["contentspal_delivery"].sent) == 1
 
 
+    @pytest.mark.asyncio
+    async def test_documents_received_xml_does_not_trigger_parser(self, tmp_path):
+        """Regression: documentsReceived XML files should not trigger the FNOL
+        parser via the deferred contentspal rule.  Previously the deferred rule
+        caused a parser invocation on every XML download regardless of
+        status_subtype, leading to 'not well-formed' errors on non-FNOL files.
+        """
+        runner = RuleRunner(producer_factory=lambda k: FakeProducer(k))
+        task = _make_download_task(
+            status_subtype="documentsReceived",
+            file_type="xml",
+        )
+
+        # Write a non-XML file to ensure no parser attempts to read it
+        bad_file = tmp_path / "A001_DOCUMENT.XML"
+        bad_file.write_bytes(b"this is not xml at all")
+
+        result = await runner.run_for_download(task, bad_file)
+        assert result == {}
+
+
 class TestRuleRunnerEvent:
     @pytest.mark.asyncio
     async def test_returns_empty_dict_when_no_rules_match(self):
