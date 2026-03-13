@@ -1,31 +1,92 @@
-"""Tests for Verisk status event handler base classes and registry."""
+"""Tests for unified RuleRunner."""
+
+import json
+from datetime import UTC, datetime
 
 import pytest
-from datetime import datetime, UTC
-
-from pipeline.verisk.handlers.base import (
-    EventHandler,
-    EventHandlerRegistry,
-    EventHandlerResult,
-    EventHandlerRunner,
-    FileHandlerSideEffect,
-    _EVENT_HANDLERS,
-    register_event_handler,
-)
-from pipeline.verisk.schemas.tasks import XACTEnrichmentTask
 from pydantic import BaseModel
 
+from pipeline.verisk.handlers.rule_runner import RuleRunner
+from pipeline.verisk.schemas.tasks import (
+    DownloadTaskMessage,
+    XACTEnrichmentTask,
+)
 
-@pytest.fixture(autouse=True)
-def clean_registry():
-    """Isolate registry state between tests."""
-    original = dict(_EVENT_HANDLERS)
-    yield
-    _EVENT_HANDLERS.clear()
-    _EVENT_HANDLERS.update(original)
+SAMPLE_FNOL_XML = b"""<?xml version="1.0" encoding="utf-8"?>
+<XACTDOC>
+  <XACTNET_INFO
+    carrierId="0000001"
+    rotationTrade="WIND/HAIL INSPECTION"
+    transactionId="AAAAAAA"
+    originalTransactionId="AAAAAAA"
+    sendersXNAddress="EXAMPLE.HOME.WEB"
+    recipientsXNAddress="EXAMPLE.ONLINE" />
+  <ADM dateOfLoss="2026-02-24T22:30:00Z" dateReceived="2026-02-26T17:53:06Z">
+    <COVERAGE_LOSS claimNumber="0000000000" policyNumber="000000000000" />
+  </ADM>
+</XACTDOC>"""
+
+SAMPLE_STATUS_DATA = {
+    "description": "Delivered",
+    "assignmentId": "AAAAAAA",
+    "xnAddress": "EXAMPLE@CARRIER_XF",
+    "originalAssignmentId": "BBBBBBB",
+    "dateTime": "2026-01-01T00:00:00.0000000Z",
+    "contact": {
+        "contactMethods": {
+            "phone": {"type": "Office", "number": "000-000-0000"},
+            "email": {"address": "adjuster@example.com"},
+        },
+        "type": "ClaimRep",
+        "name": "Jane Smith",
+    },
+    "adm": {
+        "coverageLoss": {"claimNumber": "0000000000"},
+    },
+}
 
 
-def _make_task(status_subtype: str) -> XACTEnrichmentTask:
+class FakeProducer:
+    def __init__(self, key: str = ""):
+        self.key = key
+        self.sent: list[tuple] = []
+        self.eventhub_name = f"test-{key}"
+
+    async def start(self) -> None:
+        pass
+
+    async def stop(self) -> None:
+        pass
+
+    async def send(self, value: BaseModel, key: str) -> None:
+        self.sent.append((value, key))
+
+
+def _make_download_task(
+    status_subtype: str = "firstNoticeOfLossReceived",
+    file_type: str = "xml",
+) -> DownloadTaskMessage:
+    return DownloadTaskMessage(
+        media_id="media-001",
+        trace_id="trace-001",
+        attachment_url="https://example.com/A001_FNOL_XACTDOC.XML",
+        blob_path="firstNoticeOfLossReceived/A001/trace-001",
+        status_subtype=status_subtype,
+        file_type=file_type,
+        assignment_id="A001",
+        retry_count=0,
+        event_type="xact",
+        event_subtype=status_subtype,
+        original_timestamp=datetime.now(UTC),
+    )
+
+
+def _make_enrichment_task(
+    status_subtype: str = "delivered",
+    event_type: str = "verisk.claims.property.xn.status.delivered",
+    data: dict | None = None,
+) -> XACTEnrichmentTask:
+    raw_data = json.dumps(data or SAMPLE_STATUS_DATA)
     return XACTEnrichmentTask(
         trace_id="trace-001",
         event_type="verisk",
@@ -35,168 +96,150 @@ def _make_task(status_subtype: str) -> XACTEnrichmentTask:
         retry_count=0,
         created_at=datetime.now(UTC),
         original_timestamp=datetime.now(UTC),
-        raw_event={"type": f"verisk.claims.property.xn.{status_subtype}"},
+        raw_event={"type": event_type, "data": raw_data},
     )
 
 
-class TestEventHandlerRegistry:
-    def test_returns_none_for_unregistered_subtype(self):
-        _EVENT_HANDLERS.pop("", None)  # remove wildcard for this test
-        registry = EventHandlerRegistry()
-        assert registry.get_handler("unknownStatus") is None
-
-    def test_exact_match_returned(self):
-        @register_event_handler
-        class MyHandler(EventHandler):
-            status_subtypes = ["paymentProcessorAssigned"]
-
-            async def handle(self, task):
-                return EventHandlerResult(success=True)
-
-        registry = EventHandlerRegistry()
-        handler = registry.get_handler("paymentProcessorAssigned")
-        assert isinstance(handler, MyHandler)
-
-    def test_lookup_is_case_insensitive(self):
-        @register_event_handler
-        class MyHandler(EventHandler):
-            status_subtypes = ["paymentProcessorAssigned"]
-
-            async def handle(self, task):
-                return EventHandlerResult(success=True)
-
-        registry = EventHandlerRegistry()
-        assert registry.get_handler("PAYMENTPROCESSORASSIGNED") is not None
-
-    def test_wildcard_matches_any_subtype(self):
-        @register_event_handler
-        class WildcardHandler(EventHandler):
-            status_subtypes = []  # wildcard
-
-            async def handle(self, task):
-                return EventHandlerResult(success=True)
-
-        registry = EventHandlerRegistry()
-        assert registry.get_handler("paymentProcessorAssigned") is not None
-        assert registry.get_handler("documentsReceived") is not None
-        assert registry.get_handler("anythingElse") is not None
-
-    def test_no_match_for_different_subtype(self):
-        _EVENT_HANDLERS.pop("", None)  # remove wildcard for this test
-
-        @register_event_handler
-        class MyHandler(EventHandler):
-            status_subtypes = ["paymentProcessorAssigned"]
-
-            async def handle(self, task):
-                return EventHandlerResult(success=True)
-
-        registry = EventHandlerRegistry()
-        assert registry.get_handler("documentsReceived") is None
-
-    def test_each_call_returns_new_handler_instance(self):
-        @register_event_handler
-        class MyHandler(EventHandler):
-            status_subtypes = ["paymentProcessorAssigned"]
-
-            async def handle(self, task):
-                return EventHandlerResult(success=True)
-
-        registry = EventHandlerRegistry()
-        h1 = registry.get_handler("paymentProcessorAssigned")
-        h2 = registry.get_handler("paymentProcessorAssigned")
-        assert h1 is not h2
-
-
-class TestEventHandlerRunner:
+class TestRuleRunnerDownload:
     @pytest.mark.asyncio
-    async def test_returns_empty_dict_when_no_handler(self):
-        runner = EventHandlerRunner(producer_factory=lambda k: None)
-        task = _make_task("unknownStatus")
-        result = await runner.run(task)
+    async def test_returns_empty_dict_when_no_rules_match(self):
+        runner = RuleRunner(producer_factory=lambda k: FakeProducer(k))
+        task = _make_download_task(status_subtype="unknownSubtype", file_type="pdf")
+        result = await runner.run_for_download(task, __import__("pathlib").Path("/tmp/file.pdf"))
         assert result == {}
 
     @pytest.mark.asyncio
-    async def test_returns_handler_data_on_success(self):
-        @register_event_handler
-        class MyHandler(EventHandler):
-            status_subtypes = ["paymentProcessorAssigned"]
+    async def test_fnol_produces_side_effect(self, tmp_path):
+        producers: dict[str, FakeProducer] = {}
 
-            async def handle(self, task):
-                return EventHandlerResult(
-                    success=True,
-                    data={"assignment_id": task.assignment_id},
-                )
+        def factory(key: str) -> FakeProducer:
+            p = FakeProducer(key)
+            producers[key] = p
+            return p
 
-        runner = EventHandlerRunner(producer_factory=lambda k: None)
-        task = _make_task("paymentProcessorAssigned")
-        result = await runner.run(task)
-        assert result == {"assignment_id": "A001"}
+        runner = RuleRunner(producer_factory=factory)
+        task = _make_download_task()
+
+        xml_file = tmp_path / "A001_FNOL_XACTDOC.XML"
+        xml_file.write_bytes(SAMPLE_FNOL_XML)
+
+        result = await runner.run_for_download(task, xml_file)
+
+        assert "transaction_id" in result
+        assert "fnol" in producers
+        assert len(producers["fnol"].sent) == 1
 
     @pytest.mark.asyncio
-    async def test_returns_empty_dict_on_handler_failure(self):
-        @register_event_handler
-        class FailingHandler(EventHandler):
-            status_subtypes = ["badStatus"]
+    async def test_contentspal_fires_when_dataset_matches(self, tmp_path):
+        producers: dict[str, FakeProducer] = {}
 
-            async def handle(self, task):
-                return EventHandlerResult(success=False, error="something broke")
+        def factory(key: str) -> FakeProducer:
+            p = FakeProducer(key)
+            producers[key] = p
+            return p
 
-        runner = EventHandlerRunner(producer_factory=lambda k: None)
-        task = _make_task("badStatus")
-        result = await runner.run(task)
+        runner = RuleRunner(producer_factory=factory)
+        task = _make_download_task()
+
+        xml = b"""<?xml version="1.0" encoding="utf-8"?>
+<XACTDOC>
+  <XACTNET_INFO carrierId="3372667" rotationTrade="INVENTORY"
+    transactionId="AAAAAAA" originalTransactionId="AAAAAAA"
+    sendersXNAddress="EXAMPLE.HOME.WEB" recipientsXNAddress="EXAMPLE.ONLINE" />
+  <ADM dateOfLoss="2026-02-24T22:30:00Z" dateReceived="2026-02-26T17:53:06Z">
+    <COVERAGE_LOSS claimNumber="0000000000" policyNumber="000000000000" />
+  </ADM>
+</XACTDOC>"""
+        xml_file = tmp_path / "A001_FNOL_XACTDOC.XML"
+        xml_file.write_bytes(xml)
+
+        await runner.run_for_download(task, xml_file)
+
+        # Both fnol and contentspal should fire
+        assert "fnol" in producers
+        assert "contentspal_delivery" in producers
+        assert len(producers["fnol"].sent) == 1
+        assert len(producers["contentspal_delivery"].sent) == 1
+
+
+class TestRuleRunnerEvent:
+    @pytest.mark.asyncio
+    async def test_returns_empty_dict_when_no_rules_match(self):
+        runner = RuleRunner(producer_factory=lambda k: FakeProducer(k))
+        task = _make_enrichment_task(
+            status_subtype="unknownStatus",
+            event_type="verisk.claims.property.xn.unknownStatus",
+        )
+        result = await runner.run_for_event(task)
         assert result == {}
 
     @pytest.mark.asyncio
-    async def test_side_effect_produced(self):
-        produced = []
+    async def test_xact_status_produces_side_effect(self):
+        producers: dict[str, FakeProducer] = {}
 
-        class FakeProducer:
-            async def start(self): pass
-            async def stop(self): pass
-            async def send(self, value, key):
-                produced.append((value, key))
+        def factory(key: str) -> FakeProducer:
+            p = FakeProducer(key)
+            producers[key] = p
+            return p
 
-        class SideEffectMessage(BaseModel):
-            assignment_id: str
+        runner = RuleRunner(producer_factory=factory)
+        task = _make_enrichment_task()
+        await runner.run_for_event(task)
 
-        @register_event_handler
-        class SideEffectHandler(EventHandler):
-            status_subtypes = ["paymentProcessorAssigned"]
+        assert "verisk_xact_status" in producers
+        assert len(producers["verisk_xact_status"].sent) == 1
+        msg = producers["verisk_xact_status"].sent[0][0]
+        assert msg.description == "Delivered"
 
-            async def handle(self, task):
-                return EventHandlerResult(
-                    success=True,
-                    data={},
-                    side_effect=FileHandlerSideEffect(
-                        topic_key="verisk_payment",
-                        message=SideEffectMessage(assignment_id=task.assignment_id),
-                    ),
-                )
+    @pytest.mark.asyncio
+    async def test_assignment_note_produces_side_effect(self):
+        producers: dict[str, FakeProducer] = {}
 
-        runner = EventHandlerRunner(producer_factory=lambda k: FakeProducer())
-        task = _make_task("paymentProcessorAssigned")
-        await runner.run(task)
+        def factory(key: str) -> FakeProducer:
+            p = FakeProducer(key)
+            producers[key] = p
+            return p
 
-        assert len(produced) == 1
-        msg, key = produced[0]
-        assert isinstance(msg, SideEffectMessage)
-        assert msg.assignment_id == "A001"
-        assert key == "trace-001"
+        runner = RuleRunner(producer_factory=factory)
 
+        data = {
+            "description": "Assignment Note",
+            "note": "Target Completion Date",
+            "author": "XactNet System",
+            "dateTime": "2026-02-27T13:13:40.0000000Z",
+            "adm": {"coverageLoss": {"claimNumber": "0819940122"}},
+        }
+        task = _make_enrichment_task(
+            status_subtype="assignmentNoteAdded",
+            event_type="verisk.claims.property.xn.assignmentNoteAdded",
+            data=data,
+        )
+        await runner.run_for_event(task)
+
+        assert "verisk_notes" in producers
+        assert len(producers["verisk_notes"].sent) == 1
+
+
+class TestRuleRunnerLifecycle:
     @pytest.mark.asyncio
     async def test_close_stops_all_producers(self):
-        stopped = []
+        stopped: list[str] = []
 
-        class FakeProducer:
-            def __init__(self, key):
+        class TrackingProducer:
+            def __init__(self, key: str):
                 self.key = key
-            async def start(self): pass
-            async def stop(self):
-                stopped.append(self.key)
-            async def send(self, **kw): pass
+                self.eventhub_name = f"test-{key}"
 
-        runner = EventHandlerRunner(producer_factory=lambda k: FakeProducer(k))
+            async def start(self) -> None:
+                pass
+
+            async def stop(self) -> None:
+                stopped.append(self.key)
+
+            async def send(self, **kw) -> None:
+                pass
+
+        runner = RuleRunner(producer_factory=lambda k: TrackingProducer(k))
         # Manually prime two producers
         await runner._get_producer("topic_a")
         await runner._get_producer("topic_b")

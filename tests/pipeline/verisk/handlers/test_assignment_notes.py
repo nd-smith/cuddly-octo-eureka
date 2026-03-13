@@ -1,18 +1,15 @@
-"""Tests for AssignmentNoteAddedHandler."""
+"""Tests for assignment_note rule matching, parsing, and action."""
 
 import json
 from datetime import UTC, datetime
 
 import pytest
 
-from pipeline.verisk.handlers.base import (
-    EventHandlerResult,
-    FileHandlerSideEffect,
-    _EVENT_HANDLERS,
-)
-from pipeline.verisk.handlers.assignment_notes import (
-    AssignmentNoteAddedHandler,
-    _XN_ASSIGNMENT_NOTE_MARKER,
+from pipeline.verisk.handlers.parsers import parse_event_json
+from pipeline.verisk.handlers.rules import (
+    RuleContext,
+    matches_assignment_note,
+    produce_assignment_note,
 )
 from pipeline.verisk.schemas.assignment_notes import AssignmentNoteMessage
 from pipeline.verisk.schemas.tasks import XACTEnrichmentTask
@@ -31,20 +28,6 @@ SAMPLE_DATA = {
         "coverageLoss": {"claimNumber": "0819940122"},
     },
 }
-
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture(autouse=True)
-def clean_registry():
-    """Isolate event handler registry state between tests."""
-    original = dict(_EVENT_HANDLERS)
-    yield
-    _EVENT_HANDLERS.clear()
-    _EVENT_HANDLERS.update(original)
 
 
 def _make_task(
@@ -67,77 +50,69 @@ def _make_task(
 
 
 # ---------------------------------------------------------------------------
-# AssignmentNoteAddedHandler tests
+# Rule matching tests
 # ---------------------------------------------------------------------------
 
 
-class TestAssignmentNoteAddedHandler:
-    def test_handler_is_registered_for_assignment_note_added(self):
-        assert "assignmentnoteadded" in _EVENT_HANDLERS
-        assert _EVENT_HANDLERS["assignmentnoteadded"] is AssignmentNoteAddedHandler
-
-    def test_handle_returns_success_with_side_effect(self):
-        handler = AssignmentNoteAddedHandler()
+class TestMatchesAssignmentNote:
+    def test_matches_assignment_note_event(self):
         task = _make_task()
+        ctx = RuleContext(task=task, file_path=None)
+        assert matches_assignment_note(ctx) is True
 
-        import asyncio
+    def test_no_match_non_assignment_note_event(self):
+        task = _make_task(
+            status_subtype="assignmentNoteAdded",
+            event_type="verisk.claims.property.xn.status.delivered",
+        )
+        ctx = RuleContext(task=task, file_path=None)
+        assert matches_assignment_note(ctx) is False
 
-        result = asyncio.get_event_loop().run_until_complete(handler.handle(task))
+    def test_no_match_wrong_subtype(self):
+        task = _make_task(
+            status_subtype="delivered",
+            event_type="verisk.claims.property.xn.assignmentNoteAdded",
+        )
+        ctx = RuleContext(task=task, file_path=None)
+        assert matches_assignment_note(ctx) is False
 
-        assert isinstance(result, EventHandlerResult)
-        assert result.success is True
-        assert result.side_effect is not None
-        assert isinstance(result.side_effect, FileHandlerSideEffect)
-        assert result.side_effect.topic_key == "verisk_notes"
-        assert isinstance(result.side_effect.message, AssignmentNoteMessage)
-
-    def test_handle_extracts_correct_fields(self):
-        handler = AssignmentNoteAddedHandler()
+    def test_no_match_when_file_path_present(self):
+        from pathlib import Path
         task = _make_task()
+        ctx = RuleContext(task=task, file_path=Path("/tmp/file.xml"))
+        assert matches_assignment_note(ctx) is False
 
-        import asyncio
 
-        result = asyncio.get_event_loop().run_until_complete(handler.handle(task))
+# ---------------------------------------------------------------------------
+# Action tests
+# ---------------------------------------------------------------------------
 
-        msg: AssignmentNoteMessage = result.side_effect.message
+
+class TestProduceAssignmentNote:
+    @pytest.mark.asyncio
+    async def test_produces_assignment_note_side_effect(self):
+        task = _make_task()
+        parsed = parse_event_json(task)
+        ctx = RuleContext(task=task, file_path=None, parsed_data=parsed)
+
+        side_effects = await produce_assignment_note(ctx)
+        assert len(side_effects) == 1
+        assert side_effects[0].topic_key == "verisk_notes"
+
+        msg = side_effects[0].message
+        assert isinstance(msg, AssignmentNoteMessage)
         assert msg.description == "Assignment Note"
         assert msg.note == "Target Completion Date"
         assert msg.author == "XactNet System"
         assert msg.event_date_time == "2026-02-27T13:13:40.0000000Z"
         assert msg.claim_number == "0819940122"
 
-    def test_handle_noops_for_non_matching_event_type(self):
-        """Handler must return empty no-op when event type is not xn.assignmentNoteAdded."""
-        handler = AssignmentNoteAddedHandler()
-        task = _make_task(
-            status_subtype="assignmentNoteAdded",
-            event_type="verisk.claims.property.xn.status.delivered",
-        )
+    @pytest.mark.asyncio
+    async def test_handles_invalid_json(self):
+        import json
 
-        import asyncio
-
-        result = asyncio.get_event_loop().run_until_complete(handler.handle(task))
-
-        assert result.success is True
-        assert result.side_effect is None
-        assert result.data == {}
-
-    def test_handle_returns_failure_on_invalid_json(self):
-        """Handler returns failure when raw_event data is malformed JSON."""
         task = _make_task()
         task.raw_event["data"] = "not valid json {"
 
-        import asyncio
-
-        handler = AssignmentNoteAddedHandler()
-        result = asyncio.get_event_loop().run_until_complete(handler.handle(task))
-
-        assert result.success is False
-        assert result.error is not None
-        assert result.side_effect is None
-
-    def test_xn_assignment_note_marker_value(self):
-        """Smoke-test the private sentinel used for event type gating."""
-        assert _XN_ASSIGNMENT_NOTE_MARKER == ".xn.assignmentNoteAdded"
-        assert _XN_ASSIGNMENT_NOTE_MARKER in "verisk.claims.property.xn.assignmentNoteAdded"
-        assert _XN_ASSIGNMENT_NOTE_MARKER not in "verisk.claims.property.xn.status.delivered"
+        with pytest.raises(json.JSONDecodeError):
+            parse_event_json(task)

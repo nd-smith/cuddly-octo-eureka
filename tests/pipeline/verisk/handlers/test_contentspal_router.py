@@ -1,29 +1,18 @@
-"""Tests for ContentsPal routing logic and FNOL handler integration."""
+"""Tests for ContentsPal rule matching and action."""
 
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
-from pipeline.verisk.handlers.base import _HANDLERS
-from pipeline.verisk.handlers.contentspal_router import (
-    CONTENTSPAL_DATASET,
-    CONTENTSPAL_JOB_TYPES,
-    CONTENTSPAL_TOPIC_KEY,
-    build_contentspal_side_effect,
+from pipeline.verisk.handlers.parsers import _parse_fnol_xactdoc_sync
+from pipeline.verisk.handlers.rules import (
+    RuleContext,
+    matches_contentspal,
+    produce_contentspal,
 )
-from pipeline.verisk.handlers.fnol import FnolXactdocXmlHandler
 from pipeline.verisk.schemas.fnol import FnolMessage
 from pipeline.verisk.schemas.tasks import DownloadTaskMessage
-
-
-@pytest.fixture(autouse=True)
-def clean_registry():
-    """Isolate registry state between tests."""
-    original = dict(_HANDLERS)
-    yield
-    _HANDLERS.clear()
-    _HANDLERS.update(original)
 
 
 def _make_task(status_subtype: str = "firstNoticeOfLossReceived", file_type: str = "xml") -> DownloadTaskMessage:
@@ -59,127 +48,80 @@ def _make_contentspal_xml(carrier_id: str = "3372667", rotation_trade: str = "IN
 </XACTDOC>""".encode()
 
 
-class TestBuildContentsPalSideEffect:
-    def test_matching_dataset_and_inventory_job_type(self):
-        task = _make_task()
-        parsed_data = {
-            "dataset": "3372667",
-            "job_type": "INVENTORY",
-            "blob_url": "test/blob/url",
-        }
-
-        result = build_contentspal_side_effect(task, parsed_data)
-
-        assert result is not None
-        assert result.topic_key == CONTENTSPAL_TOPIC_KEY
-        assert isinstance(result.message, FnolMessage)
-
-    def test_matching_dataset_and_pricing_task_job_type(self):
-        task = _make_task()
-        parsed_data = {
-            "dataset": "3372667",
-            "job_type": "PRICING TASK",
-            "blob_url": "test/blob/url",
-        }
-
-        result = build_contentspal_side_effect(task, parsed_data)
-
-        assert result is not None
-        assert result.topic_key == CONTENTSPAL_TOPIC_KEY
-
-    def test_non_matching_dataset_returns_none(self):
-        task = _make_task()
-        parsed_data = {
-            "dataset": "9999999",
-            "job_type": "INVENTORY",
-            "blob_url": "test/blob/url",
-        }
-
-        result = build_contentspal_side_effect(task, parsed_data)
-
-        assert result is None
-
-    def test_non_matching_job_type_returns_none(self):
-        task = _make_task()
-        parsed_data = {
-            "dataset": "3372667",
-            "job_type": "WIND/HAIL INSPECTION",
-            "blob_url": "test/blob/url",
-        }
-
-        result = build_contentspal_side_effect(task, parsed_data)
-
-        assert result is None
-
-    def test_missing_dataset_returns_none(self):
-        task = _make_task()
-        parsed_data = {"job_type": "INVENTORY", "blob_url": "test/blob/url"}
-
-        result = build_contentspal_side_effect(task, parsed_data)
-
-        assert result is None
-
-    def test_missing_job_type_returns_none(self):
-        task = _make_task()
-        parsed_data = {"dataset": "3372667", "blob_url": "test/blob/url"}
-
-        result = build_contentspal_side_effect(task, parsed_data)
-
-        assert result is None
-
-    def test_constants(self):
-        assert CONTENTSPAL_DATASET == "3372667"
-        assert CONTENTSPAL_JOB_TYPES == frozenset({"INVENTORY", "PRICING TASK"})
-        assert CONTENTSPAL_TOPIC_KEY == "contentspal_delivery"
-
-
-class TestFnolHandlerContentsPalIntegration:
-    @pytest.mark.asyncio
-    async def test_matching_fnol_produces_two_side_effects(self, tmp_path):
+class TestMatchesContentspal:
+    def test_matches_with_correct_dataset_and_inventory(self, tmp_path):
         xml_file = tmp_path / "A001_FNOL_XACTDOC.XML"
         xml_file.write_bytes(_make_contentspal_xml("3372667", "INVENTORY"))
 
-        handler = FnolXactdocXmlHandler()
-        result = await handler.handle(_make_task(), xml_file)
+        task = _make_task()
+        parsed = _parse_fnol_xactdoc_sync(xml_file)
+        ctx = RuleContext(task=task, file_path=xml_file, parsed_data=parsed)
 
-        assert result.success is True
-        assert len(result.side_effects) == 2
-        assert result.side_effects[0].topic_key == "fnol"
-        assert result.side_effects[1].topic_key == "contentspal_delivery"
+        assert matches_contentspal(ctx) is True
 
-    @pytest.mark.asyncio
-    async def test_matching_fnol_pricing_task(self, tmp_path):
+    def test_matches_with_pricing_task(self, tmp_path):
         xml_file = tmp_path / "A001_FNOL_XACTDOC.XML"
         xml_file.write_bytes(_make_contentspal_xml("3372667", "PRICING TASK"))
 
-        handler = FnolXactdocXmlHandler()
-        result = await handler.handle(_make_task(), xml_file)
+        task = _make_task()
+        parsed = _parse_fnol_xactdoc_sync(xml_file)
+        ctx = RuleContext(task=task, file_path=xml_file, parsed_data=parsed)
 
-        assert result.success is True
-        assert len(result.side_effects) == 2
-        assert result.side_effects[1].topic_key == "contentspal_delivery"
+        assert matches_contentspal(ctx) is True
 
-    @pytest.mark.asyncio
-    async def test_non_matching_fnol_produces_only_fnol_side_effect(self, tmp_path):
+    def test_no_match_wrong_dataset(self, tmp_path):
         xml_file = tmp_path / "A001_FNOL_XACTDOC.XML"
-        xml_file.write_bytes(_make_contentspal_xml("0000001", "WIND/HAIL INSPECTION"))
+        xml_file.write_bytes(_make_contentspal_xml("9999999", "INVENTORY"))
 
-        handler = FnolXactdocXmlHandler()
-        result = await handler.handle(_make_task(), xml_file)
+        task = _make_task()
+        parsed = _parse_fnol_xactdoc_sync(xml_file)
+        ctx = RuleContext(task=task, file_path=xml_file, parsed_data=parsed)
 
-        assert result.success is True
-        assert len(result.side_effects) == 1
-        assert result.side_effects[0].topic_key == "fnol"
+        assert matches_contentspal(ctx) is False
 
+    def test_no_match_wrong_job_type(self, tmp_path):
+        xml_file = tmp_path / "A001_FNOL_XACTDOC.XML"
+        xml_file.write_bytes(_make_contentspal_xml("3372667", "WIND/HAIL INSPECTION"))
+
+        task = _make_task()
+        parsed = _parse_fnol_xactdoc_sync(xml_file)
+        ctx = RuleContext(task=task, file_path=xml_file, parsed_data=parsed)
+
+        assert matches_contentspal(ctx) is False
+
+    def test_no_match_missing_dataset(self):
+        task = _make_task()
+        ctx = RuleContext(
+            task=task,
+            file_path=Path("/tmp/A001_FNOL_XACTDOC.XML"),
+            parsed_data={"job_type": "INVENTORY"},
+        )
+        assert matches_contentspal(ctx) is False
+
+    def test_no_match_missing_job_type(self):
+        task = _make_task()
+        ctx = RuleContext(
+            task=task,
+            file_path=Path("/tmp/A001_FNOL_XACTDOC.XML"),
+            parsed_data={"dataset": "3372667"},
+        )
+        assert matches_contentspal(ctx) is False
+
+
+class TestProduceContentspal:
     @pytest.mark.asyncio
-    async def test_contentspal_side_effect_message_has_correct_fields(self, tmp_path):
+    async def test_produces_contentspal_side_effect(self, tmp_path):
         xml_file = tmp_path / "A001_FNOL_XACTDOC.XML"
         xml_file.write_bytes(_make_contentspal_xml("3372667", "INVENTORY"))
 
-        handler = FnolXactdocXmlHandler()
-        result = await handler.handle(_make_task(), xml_file)
+        task = _make_task()
+        parsed = _parse_fnol_xactdoc_sync(xml_file)
+        ctx = RuleContext(task=task, file_path=xml_file, parsed_data=parsed)
 
-        msg = result.side_effects[1].message
+        side_effects = await produce_contentspal(ctx)
+        assert len(side_effects) == 1
+        assert side_effects[0].topic_key == "contentspal_delivery"
+        msg = side_effects[0].message
         assert isinstance(msg, FnolMessage)
         assert msg.dataset == "3372667"
         assert msg.job_type == "INVENTORY"

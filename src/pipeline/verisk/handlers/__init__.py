@@ -1,37 +1,13 @@
-"""Verisk download file handlers and status event handlers."""
+"""Verisk handler rule engine."""
 
-from pipeline.verisk.handlers.base import (
-    DownloadFileHandler,
-    EventHandler,
-    EventHandlerRegistry,
-    EventHandlerResult,
-    EventHandlerRunner,
-    FileHandlerRegistry,
-    FileHandlerResult,
-    FileHandlerRunner,
-    FileHandlerSideEffect,
-    get_handler_registry,
-    register_event_handler,
-    register_handler,
-)
-
-# Import handlers to trigger @register_handler / @register_event_handler decoration
-import pipeline.verisk.handlers.fnol  # noqa: F401, E402
-import pipeline.verisk.handlers.reinspection  # noqa: F401, E402
-import pipeline.verisk.handlers.assignment_notes  # noqa: F401, E402
-import pipeline.verisk.handlers.status  # noqa: F401, E402
+from pipeline.verisk.handlers.base import FileHandlerSideEffect
+from pipeline.verisk.handlers.rule_runner import RuleRunner
+from pipeline.verisk.handlers.rules import RULES, Rule, RuleContext
 
 __all__ = [
-    "DownloadFileHandler",
-    "EventHandler",
-    "EventHandlerRegistry",
-    "EventHandlerResult",
-    "EventHandlerRunner",
-    "FileHandlerRegistry",
-    "FileHandlerResult",
-    "FileHandlerRunner",
     "FileHandlerSideEffect",
-    "get_handler_registry",
-    "register_event_handler",
-    "register_handler",
+    "Rule",
+    "RuleContext",
+    "RuleRunner",
+    "RULES",
 ]

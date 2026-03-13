@@ -12,36 +12,35 @@ Output topic: xact.downloads.pending
 """
 
 import asyncio
-import orjson
 import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
 
+import orjson
 from pydantic import ValidationError
 
 from config.config import MessageConfig
+from core.errors.exceptions import PermanentError
 from core.logging.periodic_logger import PeriodicStatsLogger
 from core.logging.utilities import format_cycle_output, log_worker_error
 from core.paths.resolver import generate_blob_path
 from core.security.exceptions import URLValidationError
 from core.security.url_validation import sanitize_url, validate_download_url
 from core.types import ErrorCategory
+from pipeline.common.consumer_config import ConsumerConfig
 from pipeline.common.health import HealthCheckServer
 from pipeline.common.telemetry import initialize_worker_telemetry
-from pipeline.common.consumer_config import ConsumerConfig
 from pipeline.common.transport import create_consumer, create_producer
 from pipeline.common.types import PipelineMessage
-from pipeline.verisk.handlers import EventHandlerRunner
+from pipeline.common.worker_defaults import CYCLE_LOG_INTERVAL_SECONDS
+from pipeline.verisk.handlers import RuleRunner
 from pipeline.verisk.retry import RetryHandler
 from pipeline.verisk.schemas.tasks import (
     DownloadTaskMessage,
     XACTEnrichmentTask,
 )
-from pipeline.common.worker_defaults import CYCLE_LOG_INTERVAL_SECONDS
-
-from core.errors.exceptions import PermanentError
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +99,7 @@ class XACTEnrichmentWorker:
         self.consumer = None
         self.retry_handler: RetryHandler | None = None
 
-        self.event_handler_runner: EventHandlerRunner | None = None
+        self.event_handler_runner: RuleRunner | None = None
 
         # Health check server
         health_port = 8081
@@ -178,7 +177,7 @@ class XACTEnrichmentWorker:
             if hasattr(self.producer, "eventhub_name"):
                 self.download_topic = self.producer.eventhub_name
 
-            self.event_handler_runner = EventHandlerRunner(
+            self.event_handler_runner = RuleRunner(
                 producer_factory=lambda topic_key: create_producer(
                     config=self.producer_config,
                     domain=self.domain,
@@ -313,7 +312,7 @@ class XACTEnrichmentWorker:
                 await self._produce_download_tasks(download_tasks)
             elif self.event_handler_runner:
                 # No attachments — this is a status-only event; dispatch to event handler
-                await self.event_handler_runner.run(task)
+                await self.event_handler_runner.run_for_event(task)
 
             self._records_succeeded += 1
 

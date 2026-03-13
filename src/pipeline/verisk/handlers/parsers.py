@@ -1,31 +1,25 @@
-"""Handler for estimatePackageReceived XML attachments.
+"""Parse functions extracted from Verisk download file handlers.
 
-Handles: estimatePackageReceived + xml
-Parses REINSPECTION_FORM.XML and extracts structured fields plus the
-full raw payload for downstream consumption.
+Each parser is a plain function that takes a file path (or task) and returns
+a dict of parsed fields. The PARSERS lookup maps (status_subtype, file_type,
+filename_pattern) to the appropriate parser.
 """
 
 import asyncio
+import json
 import logging
 from pathlib import Path
+from typing import Any
 from xml.etree import ElementTree
 
-from pipeline.common.logging import extract_log_context
-from pipeline.verisk.handlers.base import (
-    DownloadFileHandler,
-    FileHandlerResult,
-    FileHandlerSideEffect,
-    register_handler,
-)
-from pipeline.verisk.schemas.grd import GrdMessage
-from pipeline.verisk.schemas.reinspection import ReinspectionMessage
-from pipeline.verisk.schemas.tasks import DownloadTaskMessage
+from pipeline.verisk.schemas.tasks import XACTEnrichmentTask
 
 logger = logging.getLogger(__name__)
 
-REINSPECTION_FILENAME = "REINSPECTION_FORM.XML"
-GRD_FILENAME_SUFFIX = "_GENERIC_ROUGHDRAFT.XML"
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def _opt_str(value: str | None) -> str | None:
     """Return stripped string, or None if empty/missing."""
@@ -52,101 +46,106 @@ def _opt_float(value: str | None) -> float | None:
         return None
 
 
-@register_handler
-class EstimatePackageXmlHandler(DownloadFileHandler):
-    """Parses XML attachments from estimatePackageReceived events.
+# ---------------------------------------------------------------------------
+# FNOL XACTDOC parser
+# ---------------------------------------------------------------------------
 
-    Parses REINSPECTION_FORM.XML to extract structured reinspection data.
-    Other XML attachments for this subtype are silently passed through
-    with no parsed data.
+FNOL_FILENAME_SUFFIX = "_FNOL_XACTDOC.XML"
+
+
+def _parse_fnol_xactdoc_sync(file_path: Path) -> dict[str, Any]:
+    """Parse FNOL_XACTDOC.XML synchronously and return extracted fields.
+
+    Fields are snake_cased. The full XML payload is stored as a string
+    under ``fnol_xactdoc_data`` for raw downstream consumption.
     """
+    tree = ElementTree.parse(file_path)  # noqa: S314 - file is locally cached, not from network
+    root = tree.getroot()  # <XACTDOC>
 
-    status_subtypes = ["estimatePackageReceived"]
-    file_types = ["xml"]
+    result: dict[str, Any] = {}
 
-    async def handle(
-        self,
-        task: DownloadTaskMessage,
-        file_path: Path,
-    ) -> FileHandlerResult:
-        attachment_filename = file_path.name.upper()
+    # --- XACTNET_INFO --------------------------------------------------------
+    xact_info = root.find("XACTNET_INFO")
+    if xact_info is not None:
+        a = xact_info.attrib
+        result.update({
+            "transaction_id":          _opt_str(a.get("transactionId")),
+            "original_transaction_id": _opt_str(a.get("originalTransactionId")),
+            "assignment_type":         _opt_str(a.get("assignmentType")),
+            "business_unit":           _opt_str(a.get("businessUnit")),
+            "dataset":                 _opt_str(a.get("carrierId")),
+            "job_type":                _opt_str(a.get("rotationTrade")),
+            "senders_xn_address":      _opt_str(a.get("sendersXNAddress")),
+            "recipients_xn_address":   _opt_str(a.get("recipientsXNAddress")),
+        })
 
-        logger.info(
-            "Running download file handler",
-            extra={
-                "handler_name": self.name,
-                "attachment_filename": file_path.name,
-                **extract_log_context(task),
-            },
-        )
+    # --- ADM -----------------------------------------------------------------
+    adm = root.find("ADM")
+    if adm is not None:
+        result.update({
+            "date_of_loss":  _opt_str(adm.attrib.get("dateOfLoss")),
+            "date_received": _opt_str(adm.attrib.get("dateReceived")),
+        })
 
-        try:
-            if attachment_filename.endswith("REINSPECTION_FORM.XML"):
-                parsed_data = await asyncio.to_thread(
-                    _parse_reinspection_form_sync, file_path
-                )
-                from datetime import UTC, datetime
-                side_effects = [
-                    FileHandlerSideEffect(
-                        topic_key="reinspections",
-                        message=ReinspectionMessage.from_handler_data(
-                            task_message=task,
-                            parsed_data={**parsed_data, "blob_url": f"{task.blob_path}/{file_path.name}"},
-                            produced_at=datetime.now(UTC),
-                        ),
-                    ),
-                ]
-            elif attachment_filename.endswith(GRD_FILENAME_SUFFIX):
-                parsed_data = _parse_grd_filename(file_path.name)
-                parsed_data["generic_roughdraft_data"] = await asyncio.to_thread(
-                    file_path.read_text, encoding="utf-8"
-                )
-                from datetime import UTC, datetime
-                side_effects = [
-                    FileHandlerSideEffect(
-                        topic_key="verisk_grd",
-                        message=GrdMessage.from_handler_data(
-                            task_message=task,
-                            parsed_data={**parsed_data, "blob_url": f"{task.blob_path}/{file_path.name}"},
-                            produced_at=datetime.now(UTC),
-                        ),
-                    ),
-                ]
-            else:
-                # No specific parser for this XML file; nothing to extract.
-                parsed_data = {}
-                side_effects = []
+        # --- COVERAGE_LOSS ---------------------------------------------------
+        coverage_loss = adm.find("COVERAGE_LOSS")
+        if coverage_loss is not None:
+            cl = coverage_loss.attrib
+            result.update({
+                "claim_number":  _opt_str(cl.get("claimNumber")),
+                "date_init_cov": _opt_str(cl.get("dateInitCov")),
+                "policy_number": _opt_str(cl.get("policyNumber")),
+            })
 
-            logger.info(
-                "Download file handler complete",
-                extra={
-                    "handler_name": self.name,
-                    "attachment_filename": file_path.name,
-                    "parsed_fields": list(parsed_data.keys()),
-                    **extract_log_context(task),
-                },
+            tol = coverage_loss.find("TOL")
+            if tol is not None:
+                result.update({
+                    "type_of_loss":      _opt_str(tol.attrib.get("code")),
+                    "type_of_loss_desc": _opt_str(tol.attrib.get("desc")),
+                })
+
+    # --- CONTACTS ------------------------------------------------------------
+    for contact in root.findall(".//CONTACTS/CONTACT"):
+        if contact.attrib.get("type") == "Client":
+            result["insured_name"] = _opt_str(contact.attrib.get("name"))
+            email = contact.find("CONTACTMETHODS/EMAIL")
+            if email is not None:
+                result["insured_email"] = _opt_str(email.attrib.get("address"))
+            # Prefer address types in priority order; fall back to first available
+            addresses = contact.findall("ADDRESSES/ADDRESS")
+            address_by_type = {a.attrib.get("type"): a for a in addresses}
+            address = next(
+                (address_by_type[t] for t in ("Property", "Home", "Mailing") if t in address_by_type),
+                addresses[0] if addresses else None,
             )
-            return FileHandlerResult(
-                success=True,
-                parsed_data={**parsed_data, "blob_url": f"{task.blob_path}/{file_path.name}"},
-                side_effects=side_effects,
-            )
+            if address is not None:
+                result.update({
+                    "insured_street": _opt_str(address.attrib.get("street")),
+                    "insured_city":   _opt_str(address.attrib.get("city")),
+                    "insured_state":  _opt_str(address.attrib.get("state")),
+                    "insured_postal": _opt_str(address.attrib.get("postal")),
+                })
+            break
 
-        except Exception as e:
-            logger.error(
-                "Download file handler failed",
-                extra={
-                    "handler_name": self.name,
-                    "attachment_filename": file_path.name,
-                    "error": str(e),
-                    **extract_log_context(task),
-                },
-                exc_info=True,
-            )
-            return FileHandlerResult(success=False, error=str(e))
+    # --- Full raw payload ----------------------------------------------------
+    result["fnol_xactdoc_data"] = ElementTree.tostring(root, encoding="unicode")
+
+    return result
 
 
-def _parse_reinspection_form_sync(file_path: Path) -> dict:
+async def parse_fnol_xactdoc(file_path: Path) -> dict[str, Any]:
+    """Async wrapper for FNOL XACTDOC XML parsing."""
+    return await asyncio.to_thread(_parse_fnol_xactdoc_sync, file_path)
+
+
+# ---------------------------------------------------------------------------
+# Reinspection form parser
+# ---------------------------------------------------------------------------
+
+REINSPECTION_FILENAME = "REINSPECTION_FORM.XML"
+
+
+def _parse_reinspection_form_sync(file_path: Path) -> dict[str, Any]:
     """Parse REINSPECTION_FORM.XML synchronously and return extracted fields.
 
     Fields are snake_cased. The full XML payload is stored as a string
@@ -155,7 +154,7 @@ def _parse_reinspection_form_sync(file_path: Path) -> dict:
     tree = ElementTree.parse(file_path)  # noqa: S314 - file is locally cached, not from network
     root = tree.getroot()  # <XACTDOC>
 
-    result: dict = {"is_reinspection": True}
+    result: dict[str, Any] = {"is_reinspection": True}
 
     # --- XACTNET_INFO --------------------------------------------------------
     xact_info = root.find("XACTNET_INFO")
@@ -231,15 +230,26 @@ def _parse_reinspection_form_sync(file_path: Path) -> dict:
     return result
 
 
-def _parse_grd_filename(filename: str) -> dict:
+async def parse_reinspection_form(file_path: Path) -> dict[str, Any]:
+    """Async wrapper for reinspection form XML parsing."""
+    return await asyncio.to_thread(_parse_reinspection_form_sync, file_path)
+
+
+# ---------------------------------------------------------------------------
+# GRD filename parser
+# ---------------------------------------------------------------------------
+
+GRD_FILENAME_SUFFIX = "_GENERIC_ROUGHDRAFT.XML"
+
+
+def parse_grd_filename(filename: str) -> dict[str, Any]:
     """Extract assignment_id and version from a GENERIC_ROUGHDRAFT filename.
 
     Expected format: ``{assignment_id}_{version}_GENERIC_ROUGHDRAFT.xml``
     or ``{assignment_id}_{version}__GENERIC_ROUGHDRAFT.xml`` (double underscore).
 
-    Example: ``055379P_2__GENERIC_ROUGHDRAFT.xml`` → assignment_id=055379P, version=2
+    Example: ``055379P_2__GENERIC_ROUGHDRAFT.xml`` -> assignment_id=055379P, version=2
     """
-    # Strip the suffix to get the prefix part
     name_upper = filename.upper()
     prefix = filename[: name_upper.index("_GENERIC_ROUGHDRAFT")]
 
@@ -256,3 +266,21 @@ def _parse_grd_filename(filename: str) -> dict:
     return {"assignment_id": assignment_id, "version": version}
 
 
+async def parse_grd(file_path: Path) -> dict[str, Any]:
+    """Parse GRD: extract filename metadata + read raw XML content."""
+    parsed = parse_grd_filename(file_path.name)
+    parsed["generic_roughdraft_data"] = await asyncio.to_thread(
+        file_path.read_text, encoding="utf-8"
+    )
+    return parsed
+
+
+# ---------------------------------------------------------------------------
+# Event JSON parser (for status-only events)
+# ---------------------------------------------------------------------------
+
+def parse_event_json(task: XACTEnrichmentTask) -> dict[str, Any]:
+    """Parse JSON data payload from a status-only event."""
+    raw_data = task.raw_event.get("data", "{}")
+    data: dict[str, Any] = json.loads(raw_data) if isinstance(raw_data, str) else raw_data
+    return data

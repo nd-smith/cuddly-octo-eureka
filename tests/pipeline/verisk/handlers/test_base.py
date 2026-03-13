@@ -1,29 +1,20 @@
-"""Tests for Verisk download file handler base classes and registry."""
+"""Tests for reinspection form parsing and rule matching."""
+
+from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
-from pipeline.verisk.handlers.base import (
-    DownloadFileHandler,
-    FileHandlerRegistry,
-    FileHandlerResult,
-    _HANDLERS,
-    register_handler,
+from pipeline.verisk.handlers.parsers import _parse_reinspection_form_sync, parse_reinspection_form
+from pipeline.verisk.handlers.rules import (
+    RuleContext,
+    matches_reinspection,
+    produce_reinspection,
 )
 from pipeline.verisk.schemas.tasks import DownloadTaskMessage
-from pathlib import Path
-from datetime import datetime, UTC
 
 
-@pytest.fixture(autouse=True)
-def clean_registry():
-    """Isolate registry state between tests."""
-    original = dict(_HANDLERS)
-    yield
-    _HANDLERS.clear()
-    _HANDLERS.update(original)
-
-
-def _make_task(status_subtype: str, file_type: str) -> DownloadTaskMessage:
+def _make_task(status_subtype: str = "estimatePackageReceived", file_type: str = "xml") -> DownloadTaskMessage:
     return DownloadTaskMessage(
         media_id="media-001",
         trace_id="trace-001",
@@ -39,64 +30,7 @@ def _make_task(status_subtype: str, file_type: str) -> DownloadTaskMessage:
     )
 
 
-class TestFileHandlerRegistry:
-    def test_returns_none_for_unregistered_key(self):
-        registry = FileHandlerRegistry()
-        assert registry.get_handler("unknownSubtype", "pdf") is None
-
-    def test_exact_match_returned(self):
-        @register_handler
-        class MyHandler(DownloadFileHandler):
-            status_subtypes = ["estimatePackageReceived"]
-            file_types = ["xml"]
-
-            async def handle(self, task, file_path):
-                return FileHandlerResult(success=True)
-
-        registry = FileHandlerRegistry()
-        handler = registry.get_handler("estimatePackageReceived", "xml")
-        assert isinstance(handler, MyHandler)
-
-    def test_lookup_is_case_insensitive(self):
-        @register_handler
-        class MyHandler(DownloadFileHandler):
-            status_subtypes = ["estimatePackageReceived"]
-            file_types = ["XML"]
-
-            async def handle(self, task, file_path):
-                return FileHandlerResult(success=True)
-
-        registry = FileHandlerRegistry()
-        assert registry.get_handler("ESTIMATEPACKAGERECEIVED", "xml") is not None
-
-    def test_wildcard_file_type_matches_any(self):
-        @register_handler
-        class WildcardHandler(DownloadFileHandler):
-            status_subtypes = ["estimatePackageReceived"]
-            file_types = []  # wildcard
-
-            async def handle(self, task, file_path):
-                return FileHandlerResult(success=True)
-
-        registry = FileHandlerRegistry()
-        assert registry.get_handler("estimatePackageReceived", "pdf") is not None
-        assert registry.get_handler("estimatePackageReceived", "esx") is not None
-
-    def test_no_match_for_different_subtype(self):
-        @register_handler
-        class MyHandler(DownloadFileHandler):
-            status_subtypes = ["estimatePackageReceived"]
-            file_types = ["xml"]
-
-            async def handle(self, task, file_path):
-                return FileHandlerResult(success=True)
-
-        registry = FileHandlerRegistry()
-        assert registry.get_handler("documentsReceived", "xml") is None
-
-
-class TestEstimatePackageXmlHandler:
-    SAMPLE_XML = b"""<?xml version="1.0" encoding="utf-8"?>
+SAMPLE_XML = b"""<?xml version="1.0" encoding="utf-8"?>
 <XACTDOC>
   <XACTNET_INFO
     transactionId="06PR5XM"
@@ -156,19 +90,14 @@ class TestEstimatePackageXmlHandler:
   </REINSPECTION_INFO>
 </XACTDOC>"""
 
-    @pytest.mark.asyncio
-    async def test_reinspection_form_parsed(self, tmp_path):
-        from pipeline.verisk.handlers.reinspection import EstimatePackageXmlHandler
 
+class TestParseReinspectionForm:
+    def test_reinspection_form_parsed(self, tmp_path):
         xml_file = tmp_path / "2F06PR5XM_1_REINSPECTION_FORM.XML"
-        xml_file.write_bytes(self.SAMPLE_XML)
+        xml_file.write_bytes(SAMPLE_XML)
 
-        handler = EstimatePackageXmlHandler()
-        task = _make_task("estimatePackageReceived", "xml")
-        result = await handler.handle(task, xml_file)
+        d = _parse_reinspection_form_sync(xml_file)
 
-        assert result.success is True
-        d = result.parsed_data
         assert d["is_reinspection"] is True
         assert d["transaction_id"] == "06PR5XM"
         assert d["claim_number"] == "0806720421"
@@ -186,37 +115,64 @@ class TestEstimatePackageXmlHandler:
         assert d["estimate_version"] == 1
         assert d["filtered_overwrite_count"] == 4
         assert d["filtered_underwrite_count"] == 1
-        assert d["filtered_overhead_acv"] is None  # empty string → None
+        assert d["filtered_overhead_acv"] is None  # empty string -> None
         assert d["filtered_over_acv"] == 973.87
         assert d["filtered_total_rcv"] == 1150.69
         assert d["filtered_error_percent_acv"] == 3.73
         assert "reinspection_form_data" in d
         assert "XACTDOC" in d["reinspection_form_data"]
-        assert d["blob_url"] == "estimatePackageReceived/A001/trace-001/file.xml/2F06PR5XM_1_REINSPECTION_FORM.XML"
-    @pytest.mark.asyncio
-    async def test_non_reinspection_xml_returns_empty_data(self, tmp_path):
-        from pipeline.verisk.handlers.reinspection import EstimatePackageXmlHandler
-
-        xml_file = tmp_path / "other_attachment.xml"
-        xml_file.write_bytes(b"<Root><data>x</data></Root>")
-
-        handler = EstimatePackageXmlHandler()
-        task = _make_task("estimatePackageReceived", "xml")
-        result = await handler.handle(task, xml_file)
-
-        assert result.success is True
-        assert result.parsed_data == {"blob_url": "estimatePackageReceived/A001/trace-001/file.xml/other_attachment.xml"}
 
     @pytest.mark.asyncio
-    async def test_malformed_xml_returns_failure(self, tmp_path):
-        from pipeline.verisk.handlers.reinspection import EstimatePackageXmlHandler
+    async def test_async_wrapper(self, tmp_path):
+        xml_file = tmp_path / "REINSPECTION_FORM.XML"
+        xml_file.write_bytes(SAMPLE_XML)
+
+        d = await parse_reinspection_form(xml_file)
+        assert d["is_reinspection"] is True
+        assert d["transaction_id"] == "06PR5XM"
+
+    def test_malformed_xml_raises(self, tmp_path):
+        from xml.etree.ElementTree import ParseError
 
         xml_file = tmp_path / "REINSPECTION_FORM.XML"
         xml_file.write_bytes(b"<not valid xml <<")
 
-        handler = EstimatePackageXmlHandler()
-        task = _make_task("estimatePackageReceived", "xml")
-        result = await handler.handle(task, xml_file)
+        with pytest.raises(ParseError):
+            _parse_reinspection_form_sync(xml_file)
 
-        assert result.success is False
-        assert result.error is not None
+
+class TestMatchesReinspection:
+    def test_matches_correct_combination(self):
+        task = _make_task()
+        ctx = RuleContext(task=task, file_path=Path("/tmp/REINSPECTION_FORM.XML"))
+        assert matches_reinspection(ctx) is True
+
+    def test_no_match_wrong_subtype(self):
+        task = _make_task(status_subtype="firstNoticeOfLossReceived")
+        ctx = RuleContext(task=task, file_path=Path("/tmp/REINSPECTION_FORM.XML"))
+        assert matches_reinspection(ctx) is False
+
+    def test_no_match_wrong_filename(self):
+        task = _make_task()
+        ctx = RuleContext(task=task, file_path=Path("/tmp/other.xml"))
+        assert matches_reinspection(ctx) is False
+
+    def test_no_match_no_file_path(self):
+        task = _make_task()
+        ctx = RuleContext(task=task, file_path=None)
+        assert matches_reinspection(ctx) is False
+
+
+class TestProduceReinspection:
+    @pytest.mark.asyncio
+    async def test_produces_reinspection_side_effect(self, tmp_path):
+        xml_file = tmp_path / "REINSPECTION_FORM.XML"
+        xml_file.write_bytes(SAMPLE_XML)
+
+        task = _make_task()
+        parsed = _parse_reinspection_form_sync(xml_file)
+        ctx = RuleContext(task=task, file_path=xml_file, parsed_data=parsed)
+
+        side_effects = await produce_reinspection(ctx)
+        assert len(side_effects) == 1
+        assert side_effects[0].topic_key == "reinspections"

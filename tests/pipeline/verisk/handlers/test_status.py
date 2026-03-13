@@ -1,16 +1,16 @@
-"""Tests for XactStatusEventHandler and XactStatusMessage schema."""
+"""Tests for xact_status rule matching, parsing, and action."""
 
 import json
 from datetime import UTC, datetime
 
 import pytest
 
-from pipeline.verisk.handlers.base import (
-    EventHandlerResult,
-    FileHandlerSideEffect,
-    _EVENT_HANDLERS,
+from pipeline.verisk.handlers.parsers import parse_event_json
+from pipeline.verisk.handlers.rules import (
+    RuleContext,
+    matches_xact_status,
+    produce_xact_status,
 )
-from pipeline.verisk.handlers.status import XactStatusEventHandler, _XN_STATUS_MARKER
 from pipeline.verisk.schemas.tasks import XACTEnrichmentTask
 from pipeline.verisk.schemas.xact_status import XactStatusMessage
 
@@ -36,20 +36,6 @@ SAMPLE_DATA = {
         "coverageLoss": {"claimNumber": "0000000000"},
     },
 }
-
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture(autouse=True)
-def clean_registry():
-    """Isolate event handler registry state between tests."""
-    original = dict(_EVENT_HANDLERS)
-    yield
-    _EVENT_HANDLERS.clear()
-    _EVENT_HANDLERS.update(original)
 
 
 def _make_task(
@@ -98,7 +84,7 @@ class TestXactStatusMessage:
         assert msg.produced_at == produced
 
     def test_is_reassignment_false_when_original_matches_assignment(self):
-        data = {**SAMPLE_DATA, "originalAssignmentId": "A001"}  # matches task.assignment_id
+        data = {**SAMPLE_DATA, "originalAssignmentId": "A001"}
         task = _make_task(data=data)
         msg = XactStatusMessage.from_handler_data(task, data, datetime.now(UTC))
         assert msg.is_reassignment is False
@@ -145,93 +131,69 @@ class TestXactStatusMessage:
 
 
 # ---------------------------------------------------------------------------
-# XactStatusEventHandler tests
+# Rule matching tests
 # ---------------------------------------------------------------------------
 
 
-class TestXactStatusEventHandler:
-    def test_handler_is_registered_as_wildcard(self):
-        assert "" in _EVENT_HANDLERS
-        assert _EVENT_HANDLERS[""] is XactStatusEventHandler
-
-    def test_handle_returns_success_with_side_effect(self):
-        handler = XactStatusEventHandler()
+class TestMatchesXactStatus:
+    def test_matches_xn_status_event(self):
         task = _make_task()
+        ctx = RuleContext(task=task, file_path=None)
+        assert matches_xact_status(ctx) is True
 
-        import asyncio
+    def test_no_match_non_status_event(self):
+        task = _make_task(
+            status_subtype="documentsReceived",
+            event_type="verisk.claims.property.xn.documentsReceived",
+        )
+        ctx = RuleContext(task=task, file_path=None)
+        assert matches_xact_status(ctx) is False
 
-        result = asyncio.get_event_loop().run_until_complete(handler.handle(task))
+    def test_matches_any_xn_status_subtype(self):
+        task = _make_task(
+            status_subtype="accepted",
+            event_type="verisk.claims.property.xn.status.accepted",
+        )
+        ctx = RuleContext(task=task, file_path=None)
+        assert matches_xact_status(ctx) is True
 
-        assert isinstance(result, EventHandlerResult)
-        assert result.success is True
-        assert result.side_effect is not None
-        assert isinstance(result.side_effect, FileHandlerSideEffect)
-        assert result.side_effect.topic_key == "verisk_xact_status"
-        assert isinstance(result.side_effect.message, XactStatusMessage)
-
-    def test_handle_extracts_correct_fields(self):
-        handler = XactStatusEventHandler()
+    def test_no_match_when_file_path_present(self):
+        from pathlib import Path
         task = _make_task()
+        ctx = RuleContext(task=task, file_path=Path("/tmp/file.xml"))
+        assert matches_xact_status(ctx) is False
 
-        import asyncio
 
-        result = asyncio.get_event_loop().run_until_complete(handler.handle(task))
+# ---------------------------------------------------------------------------
+# Action tests
+# ---------------------------------------------------------------------------
 
-        msg: XactStatusMessage = result.side_effect.message
+
+class TestProduceXactStatus:
+    @pytest.mark.asyncio
+    async def test_produces_xact_status_side_effect(self):
+        task = _make_task()
+        parsed = parse_event_json(task)
+        ctx = RuleContext(task=task, file_path=None, parsed_data=parsed)
+
+        side_effects = await produce_xact_status(ctx)
+        assert len(side_effects) == 1
+        assert side_effects[0].topic_key == "verisk_xact_status"
+
+        msg = side_effects[0].message
+        assert isinstance(msg, XactStatusMessage)
         assert msg.description == "Delivered"
         assert msg.xn_address == "EXAMPLE@CARRIER_XF"
         assert msg.original_assignment_id == "BBBBBBB"
         assert msg.contact_name == "Jane Smith"
         assert msg.claim_number == "0000000000"
 
-    def test_handle_noops_for_non_status_event_type(self):
-        """Handler must return empty no-op when event type is not xn.status.*."""
-        handler = XactStatusEventHandler()
-        task = _make_task(
-            status_subtype="documentsReceived",
-            event_type="verisk.claims.property.xn.documentsReceived",
-        )
+    @pytest.mark.asyncio
+    async def test_handles_invalid_json(self):
+        import json
 
-        import asyncio
-
-        result = asyncio.get_event_loop().run_until_complete(handler.handle(task))
-
-        assert result.success is True
-        assert result.side_effect is None
-        assert result.data == {}
-
-    def test_handle_processes_any_xn_status_subtype(self):
-        """Wildcard applies to any xn.status.* event, not just 'delivered'."""
-        handler = XactStatusEventHandler()
-        task = _make_task(
-            status_subtype="accepted",
-            event_type="verisk.claims.property.xn.status.accepted",
-        )
-
-        import asyncio
-
-        result = asyncio.get_event_loop().run_until_complete(handler.handle(task))
-
-        assert result.success is True
-        assert result.side_effect is not None
-        assert result.side_effect.message.status_subtype == "accepted"
-
-    def test_handle_returns_failure_on_invalid_json(self):
-        """Handler returns failure=False when raw_event data is malformed JSON."""
         task = _make_task()
         task.raw_event["data"] = "not valid json {"
 
-        import asyncio
-
-        handler = XactStatusEventHandler()
-        result = asyncio.get_event_loop().run_until_complete(handler.handle(task))
-
-        assert result.success is False
-        assert result.error is not None
-        assert result.side_effect is None
-
-    def test_xn_status_marker_value(self):
-        """Smoke-test the private sentinel used for event type gating."""
-        assert _XN_STATUS_MARKER == ".xn.status."
-        assert _XN_STATUS_MARKER in "verisk.claims.property.xn.status.delivered"
-        assert _XN_STATUS_MARKER not in "verisk.claims.property.xn.documentsReceived"
+        with pytest.raises(json.JSONDecodeError):
+            parse_event_json(task)

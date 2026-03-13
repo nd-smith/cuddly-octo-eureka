@@ -1,22 +1,17 @@
-"""Tests for GENERIC_ROUGHDRAFT handling in EstimatePackageXmlHandler."""
+"""Tests for GENERIC_ROUGHDRAFT parsing and rule matching."""
 
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
-from pipeline.verisk.handlers.base import _HANDLERS
-from pipeline.verisk.handlers.reinspection import EstimatePackageXmlHandler
+from pipeline.verisk.handlers.parsers import parse_grd, parse_grd_filename
+from pipeline.verisk.handlers.rules import (
+    RuleContext,
+    matches_grd,
+    produce_grd,
+)
 from pipeline.verisk.schemas.tasks import DownloadTaskMessage
-
-
-@pytest.fixture(autouse=True)
-def clean_registry():
-    """Isolate registry state between tests."""
-    original = dict(_HANDLERS)
-    yield
-    _HANDLERS.clear()
-    _HANDLERS.update(original)
 
 
 def _make_task(status_subtype: str = "estimatePackageReceived", file_type: str = "xml") -> DownloadTaskMessage:
@@ -46,89 +41,61 @@ SAMPLE_GRD_XML = b"""<?xml version='1.0' encoding='UTF-8' ?>
 </GENERIC_ROUGHDRAFT>"""
 
 
-class TestGrdHandler:
+class TestParseGrd:
+    def test_grd_filename_double_underscore(self):
+        d = parse_grd_filename("055379P_2__GENERIC_ROUGHDRAFT.xml")
+        assert d["assignment_id"] == "055379P"
+        assert d["version"] == "2"
+
+    def test_grd_filename_single_underscore(self):
+        d = parse_grd_filename("ABC123_5_GENERIC_ROUGHDRAFT.xml")
+        assert d["assignment_id"] == "ABC123"
+        assert d["version"] == "5"
+
     @pytest.mark.asyncio
-    async def test_grd_parsed(self, tmp_path):
+    async def test_parse_grd_reads_content(self, tmp_path):
         xml_file = tmp_path / "055379P_2__GENERIC_ROUGHDRAFT.xml"
         xml_file.write_bytes(SAMPLE_GRD_XML)
 
-        handler = EstimatePackageXmlHandler()
-        task = _make_task()
-        result = await handler.handle(task, xml_file)
-
-        assert result.success is True
-        d = result.parsed_data
-
+        d = await parse_grd(xml_file)
         assert d["assignment_id"] == "055379P"
         assert d["version"] == "2"
         assert "GENERIC_ROUGHDRAFT" in d["generic_roughdraft_data"]
-        assert d["blob_url"] == "estimatePackageReceived/055379P/trace-grd-001/055379P_2__GENERIC_ROUGHDRAFT.xml"
 
+
+class TestMatchesGrd:
+    def test_matches_correct_combination(self):
+        task = _make_task()
+        ctx = RuleContext(task=task, file_path=Path("/tmp/055379P_2__GENERIC_ROUGHDRAFT.XML"))
+        assert matches_grd(ctx) is True
+
+    def test_no_match_wrong_subtype(self):
+        task = _make_task(status_subtype="firstNoticeOfLossReceived")
+        ctx = RuleContext(task=task, file_path=Path("/tmp/055379P_2__GENERIC_ROUGHDRAFT.XML"))
+        assert matches_grd(ctx) is False
+
+    def test_no_match_wrong_filename(self):
+        task = _make_task()
+        ctx = RuleContext(task=task, file_path=Path("/tmp/other.xml"))
+        assert matches_grd(ctx) is False
+
+
+class TestProduceGrd:
     @pytest.mark.asyncio
-    async def test_side_effect_topic_key(self, tmp_path):
+    async def test_produces_grd_side_effect(self, tmp_path):
         xml_file = tmp_path / "055379P_2__GENERIC_ROUGHDRAFT.xml"
         xml_file.write_bytes(SAMPLE_GRD_XML)
 
-        handler = EstimatePackageXmlHandler()
-        result = await handler.handle(_make_task(), xml_file)
+        task = _make_task()
+        parsed = await parse_grd(xml_file)
+        ctx = RuleContext(task=task, file_path=xml_file, parsed_data=parsed)
 
-        assert len(result.side_effects) > 0
-        assert result.side_effects[0].topic_key == "verisk_grd"
+        side_effects = await produce_grd(ctx)
+        assert len(side_effects) == 1
+        assert side_effects[0].topic_key == "verisk_grd"
 
-    @pytest.mark.asyncio
-    async def test_side_effect_message_fields(self, tmp_path):
-        xml_file = tmp_path / "055379P_2__GENERIC_ROUGHDRAFT.xml"
-        xml_file.write_bytes(SAMPLE_GRD_XML)
-
-        handler = EstimatePackageXmlHandler()
-        result = await handler.handle(_make_task(), xml_file)
-
-        msg = result.side_effects[0].message
+        msg = side_effects[0].message
         assert msg.assignment_id == "055379P"
         assert msg.version == "2"
         assert msg.trace_id == "trace-grd-001"
         assert msg.generic_roughdraft_data is not None
-
-    @pytest.mark.asyncio
-    async def test_non_grd_xml_passes_through(self, tmp_path):
-        xml_file = tmp_path / "other_attachment.xml"
-        xml_file.write_bytes(b"<Root><data>x</data></Root>")
-
-        handler = EstimatePackageXmlHandler()
-        result = await handler.handle(_make_task(), xml_file)
-
-        assert result.success is True
-        assert len(result.side_effects) == 0
-        assert result.parsed_data == {
-            "blob_url": "estimatePackageReceived/055379P/trace-grd-001/other_attachment.xml"
-        }
-
-    @pytest.mark.asyncio
-    async def test_reinspection_still_works(self, tmp_path):
-        """Ensure REINSPECTION_FORM.XML is still handled by the reinspection branch."""
-        xml = b"""<?xml version="1.0" encoding="utf-8"?>
-<XACTDOC>
-  <XACTNET_INFO transactionId="AAAAAAA" assignmentId="A001" carrierId="C001" />
-</XACTDOC>"""
-        xml_file = tmp_path / "REINSPECTION_FORM.XML"
-        xml_file.write_bytes(xml)
-
-        handler = EstimatePackageXmlHandler()
-        result = await handler.handle(_make_task(), xml_file)
-
-        assert result.success is True
-        assert len(result.side_effects) > 0
-        assert result.side_effects[0].topic_key == "reinspections"
-
-    @pytest.mark.asyncio
-    async def test_grd_filename_single_underscore(self, tmp_path):
-        """Handle filenames with single underscore before GENERIC_ROUGHDRAFT."""
-        xml_file = tmp_path / "ABC123_5_GENERIC_ROUGHDRAFT.xml"
-        xml_file.write_bytes(SAMPLE_GRD_XML)
-
-        handler = EstimatePackageXmlHandler()
-        result = await handler.handle(_make_task(), xml_file)
-
-        assert result.success is True
-        assert result.parsed_data["assignment_id"] == "ABC123"
-        assert result.parsed_data["version"] == "5"

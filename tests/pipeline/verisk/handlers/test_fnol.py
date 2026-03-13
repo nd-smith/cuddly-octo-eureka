@@ -1,22 +1,17 @@
-"""Tests for FnolXactdocXmlHandler and FNOL XML parsing."""
+"""Tests for FNOL XACTDOC parsing and rule matching."""
 
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
-from pipeline.verisk.handlers.fnol import FnolXactdocXmlHandler
-from pipeline.verisk.handlers.base import _HANDLERS
+from pipeline.verisk.handlers.parsers import _parse_fnol_xactdoc_sync, parse_fnol_xactdoc
+from pipeline.verisk.handlers.rules import (
+    RuleContext,
+    matches_fnol_xactdoc,
+    produce_fnol,
+)
 from pipeline.verisk.schemas.tasks import DownloadTaskMessage
-
-
-@pytest.fixture(autouse=True)
-def clean_registry():
-    """Isolate registry state between tests."""
-    original = dict(_HANDLERS)
-    yield
-    _HANDLERS.clear()
-    _HANDLERS.update(original)
 
 
 def _make_task(status_subtype: str = "firstNoticeOfLossReceived", file_type: str = "xml") -> DownloadTaskMessage:
@@ -97,18 +92,12 @@ SAMPLE_FNOL_XML = b"""<?xml version="1.0" encoding="utf-8"?>
 </XACTDOC>"""
 
 
-class TestFnolXactdocXmlHandler:
-    @pytest.mark.asyncio
-    async def test_fnol_xactdoc_parsed(self, tmp_path):
+class TestParseFnolXactdoc:
+    def test_fnol_xactdoc_parsed(self, tmp_path):
         xml_file = tmp_path / "A001_FNOL_XACTDOC.XML"
         xml_file.write_bytes(SAMPLE_FNOL_XML)
 
-        handler = FnolXactdocXmlHandler()
-        task = _make_task()
-        result = await handler.handle(task, xml_file)
-
-        assert result.success is True
-        d = result.parsed_data
+        d = _parse_fnol_xactdoc_sync(xml_file)
 
         # XACTNET_INFO
         assert d["transaction_id"] == "AAAAAAA"
@@ -145,84 +134,15 @@ class TestFnolXactdocXmlHandler:
         assert "fnol_xactdoc_data" in d
         assert "XACTDOC" in d["fnol_xactdoc_data"]
 
-        # blob_url
-        assert d["blob_url"] == "firstNoticeOfLossReceived/A001/trace-001/A001_FNOL_XACTDOC.XML"
-
     @pytest.mark.asyncio
-    async def test_is_reassignment_false_when_transaction_ids_match(self, tmp_path):
-        # Sample XML has transactionId == originalTransactionId → not a reassignment
+    async def test_async_wrapper(self, tmp_path):
         xml_file = tmp_path / "A001_FNOL_XACTDOC.XML"
         xml_file.write_bytes(SAMPLE_FNOL_XML)
 
-        handler = FnolXactdocXmlHandler()
-        result = await handler.handle(_make_task(), xml_file)
+        d = await parse_fnol_xactdoc(xml_file)
+        assert d["transaction_id"] == "AAAAAAA"
 
-        assert result.success is True
-        assert result.side_effects[0].message.is_reassignment is False
-
-    @pytest.mark.asyncio
-    async def test_is_reassignment_true_when_transaction_ids_differ(self, tmp_path):
-        xml_reassigned = SAMPLE_FNOL_XML.replace(
-            b'originalTransactionId="AAAAAAA"', b'originalTransactionId="BBBBBBB"'
-        )
-        xml_file = tmp_path / "A001_FNOL_XACTDOC.XML"
-        xml_file.write_bytes(xml_reassigned)
-
-        handler = FnolXactdocXmlHandler()
-        result = await handler.handle(_make_task(), xml_file)
-
-        assert result.success is True
-        assert result.side_effects[0].message.is_reassignment is True
-
-    @pytest.mark.asyncio
-    async def test_is_reassignment_false_when_original_transaction_id_absent(self, tmp_path):
-        xml_no_orig = SAMPLE_FNOL_XML.replace(b'originalTransactionId="AAAAAAA"', b"")
-        xml_file = tmp_path / "A001_FNOL_XACTDOC.XML"
-        xml_file.write_bytes(xml_no_orig)
-
-        handler = FnolXactdocXmlHandler()
-        result = await handler.handle(_make_task(), xml_file)
-
-        assert result.success is True
-        assert result.side_effects[0].message.is_reassignment is False
-
-    @pytest.mark.asyncio
-    async def test_side_effect_topic_key(self, tmp_path):
-        xml_file = tmp_path / "A001_FNOL_XACTDOC.XML"
-        xml_file.write_bytes(SAMPLE_FNOL_XML)
-
-        handler = FnolXactdocXmlHandler()
-        result = await handler.handle(_make_task(), xml_file)
-
-        assert len(result.side_effects) > 0
-        assert result.side_effects[0].topic_key == "fnol"
-
-    @pytest.mark.asyncio
-    async def test_non_fnol_xml_passes_through(self, tmp_path):
-        xml_file = tmp_path / "other_attachment.xml"
-        xml_file.write_bytes(b"<Root><data>x</data></Root>")
-
-        handler = FnolXactdocXmlHandler()
-        result = await handler.handle(_make_task(), xml_file)
-
-        assert result.success is True
-        assert len(result.side_effects) == 0
-        assert result.parsed_data == {"blob_url": "firstNoticeOfLossReceived/A001/trace-001/other_attachment.xml"}
-
-    @pytest.mark.asyncio
-    async def test_malformed_xml_returns_failure(self, tmp_path):
-        xml_file = tmp_path / "A001_FNOL_XACTDOC.XML"
-        xml_file.write_bytes(b"<not valid xml <<")
-
-        handler = FnolXactdocXmlHandler()
-        result = await handler.handle(_make_task(), xml_file)
-
-        assert result.success is False
-        assert result.error is not None
-
-    @pytest.mark.asyncio
-    async def test_address_priority_property_over_home(self, tmp_path):
-        """Property address takes priority over Home when both are present."""
+    def test_address_priority_property_over_home(self, tmp_path):
         xml = b"""<?xml version="1.0" encoding="utf-8"?>
 <XACTDOC>
   <XACTNET_INFO transactionId="AAAAAAA" />
@@ -239,14 +159,11 @@ class TestFnolXactdocXmlHandler:
         xml_file = tmp_path / "A001_FNOL_XACTDOC.XML"
         xml_file.write_bytes(xml)
 
-        result = await FnolXactdocXmlHandler().handle(_make_task(), xml_file)
+        d = _parse_fnol_xactdoc_sync(xml_file)
+        assert d["insured_street"] == "2 PROPERTY ST"
+        assert d["insured_city"] == "PROPERTY CITY"
 
-        assert result.parsed_data["insured_street"] == "2 PROPERTY ST"
-        assert result.parsed_data["insured_city"] == "PROPERTY CITY"
-
-    @pytest.mark.asyncio
-    async def test_address_priority_home_when_no_property(self, tmp_path):
-        """Falls back to Home address when no Property address present."""
+    def test_address_priority_home_when_no_property(self, tmp_path):
         xml = b"""<?xml version="1.0" encoding="utf-8"?>
 <XACTDOC>
   <XACTNET_INFO transactionId="AAAAAAA" />
@@ -263,14 +180,11 @@ class TestFnolXactdocXmlHandler:
         xml_file = tmp_path / "A001_FNOL_XACTDOC.XML"
         xml_file.write_bytes(xml)
 
-        result = await FnolXactdocXmlHandler().handle(_make_task(), xml_file)
+        d = _parse_fnol_xactdoc_sync(xml_file)
+        assert d["insured_street"] == "1 HOME ST"
+        assert d["insured_city"] == "HOME CITY"
 
-        assert result.parsed_data["insured_street"] == "1 HOME ST"
-        assert result.parsed_data["insured_city"] == "HOME CITY"
-
-    @pytest.mark.asyncio
-    async def test_address_priority_mailing_when_no_property_or_home(self, tmp_path):
-        """Falls back to Mailing address when no Property or Home present."""
+    def test_address_priority_mailing_when_no_property_or_home(self, tmp_path):
         xml = b"""<?xml version="1.0" encoding="utf-8"?>
 <XACTDOC>
   <XACTNET_INFO transactionId="AAAAAAA" />
@@ -286,14 +200,93 @@ class TestFnolXactdocXmlHandler:
         xml_file = tmp_path / "A001_FNOL_XACTDOC.XML"
         xml_file.write_bytes(xml)
 
-        result = await FnolXactdocXmlHandler().handle(_make_task(), xml_file)
+        d = _parse_fnol_xactdoc_sync(xml_file)
+        assert d["insured_street"] == "3 MAILING ST"
+        assert d["insured_city"] == "MAILING CITY"
 
-        assert result.parsed_data["insured_street"] == "3 MAILING ST"
-        assert result.parsed_data["insured_city"] == "MAILING CITY"
-        from pipeline.verisk.handlers.base import FileHandlerRegistry
-        import pipeline.verisk.handlers.fnol  # noqa: F401 - trigger registration
 
-        registry = FileHandlerRegistry()
-        assert registry.get_handler("firstnoticeoflossreceived", "xml") is not None
-        assert registry.get_handler("firstNoticeOfLossReceived", "XML") is not None
-        assert isinstance(registry.get_handler("firstNoticeOfLossReceived", "xml"), FnolXactdocXmlHandler)
+class TestMatchesFnolXactdoc:
+    def test_matches_correct_combination(self):
+        task = _make_task()
+        ctx = RuleContext(task=task, file_path=Path("/tmp/A001_FNOL_XACTDOC.XML"))
+        assert matches_fnol_xactdoc(ctx) is True
+
+    def test_no_match_wrong_subtype(self):
+        task = _make_task(status_subtype="estimatePackageReceived")
+        ctx = RuleContext(task=task, file_path=Path("/tmp/A001_FNOL_XACTDOC.XML"))
+        assert matches_fnol_xactdoc(ctx) is False
+
+    def test_no_match_wrong_filename(self):
+        task = _make_task()
+        ctx = RuleContext(task=task, file_path=Path("/tmp/other.xml"))
+        assert matches_fnol_xactdoc(ctx) is False
+
+    def test_no_match_no_file_path(self):
+        task = _make_task()
+        ctx = RuleContext(task=task, file_path=None)
+        assert matches_fnol_xactdoc(ctx) is False
+
+
+class TestProduceFnol:
+    @pytest.mark.asyncio
+    async def test_produces_fnol_side_effect(self, tmp_path):
+        xml_file = tmp_path / "A001_FNOL_XACTDOC.XML"
+        xml_file.write_bytes(SAMPLE_FNOL_XML)
+
+        task = _make_task()
+        parsed = _parse_fnol_xactdoc_sync(xml_file)
+        ctx = RuleContext(task=task, file_path=xml_file, parsed_data=parsed)
+
+        side_effects = await produce_fnol(ctx)
+        assert len(side_effects) == 1
+        assert side_effects[0].topic_key == "fnol"
+
+    @pytest.mark.asyncio
+    async def test_is_reassignment_false_when_ids_match(self, tmp_path):
+        xml_file = tmp_path / "A001_FNOL_XACTDOC.XML"
+        xml_file.write_bytes(SAMPLE_FNOL_XML)
+
+        task = _make_task()
+        parsed = _parse_fnol_xactdoc_sync(xml_file)
+        ctx = RuleContext(task=task, file_path=xml_file, parsed_data=parsed)
+
+        side_effects = await produce_fnol(ctx)
+        assert side_effects[0].message.is_reassignment is False
+
+    @pytest.mark.asyncio
+    async def test_is_reassignment_true_when_ids_differ(self, tmp_path):
+        xml_reassigned = SAMPLE_FNOL_XML.replace(
+            b'originalTransactionId="AAAAAAA"', b'originalTransactionId="BBBBBBB"'
+        )
+        xml_file = tmp_path / "A001_FNOL_XACTDOC.XML"
+        xml_file.write_bytes(xml_reassigned)
+
+        task = _make_task()
+        parsed = _parse_fnol_xactdoc_sync(xml_file)
+        ctx = RuleContext(task=task, file_path=xml_file, parsed_data=parsed)
+
+        side_effects = await produce_fnol(ctx)
+        assert side_effects[0].message.is_reassignment is True
+
+    @pytest.mark.asyncio
+    async def test_is_reassignment_false_when_original_absent(self, tmp_path):
+        xml_no_orig = SAMPLE_FNOL_XML.replace(b'originalTransactionId="AAAAAAA"', b"")
+        xml_file = tmp_path / "A001_FNOL_XACTDOC.XML"
+        xml_file.write_bytes(xml_no_orig)
+
+        task = _make_task()
+        parsed = _parse_fnol_xactdoc_sync(xml_file)
+        ctx = RuleContext(task=task, file_path=xml_file, parsed_data=parsed)
+
+        side_effects = await produce_fnol(ctx)
+        assert side_effects[0].message.is_reassignment is False
+
+    @pytest.mark.asyncio
+    async def test_malformed_xml_raises(self, tmp_path):
+        from xml.etree.ElementTree import ParseError
+
+        xml_file = tmp_path / "A001_FNOL_XACTDOC.XML"
+        xml_file.write_bytes(b"<not valid xml <<")
+
+        with pytest.raises(ParseError):
+            _parse_fnol_xactdoc_sync(xml_file)

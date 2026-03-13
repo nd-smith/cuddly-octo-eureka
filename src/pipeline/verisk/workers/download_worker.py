@@ -33,14 +33,15 @@ from typing import Any
 import aiohttp
 
 from config.config import MessageConfig
-from core.security.ssl_dev_bypass import get_aiohttp_ssl_context
 from core.download.downloader import AttachmentDownloader
 from core.download.models import DownloadOutcome, DownloadTask
 from core.errors.exceptions import CircuitOpenError
 from core.logging.context import set_log_context
 from core.logging.periodic_logger import PeriodicStatsLogger
 from core.logging.utilities import format_cycle_output, log_worker_error
+from core.security.ssl_dev_bypass import get_aiohttp_ssl_context
 from core.types import ErrorCategory
+from pipeline.common.consumer_config import ConsumerConfig
 from pipeline.common.decorators import set_log_context_from_message
 from pipeline.common.health import HealthCheckServer
 from pipeline.common.metrics import (
@@ -52,19 +53,18 @@ from pipeline.common.metrics import (
 )
 from pipeline.common.stale_file_cleaner import StaleFileCleaner
 from pipeline.common.telemetry import initialize_worker_telemetry
-from pipeline.common.consumer_config import ConsumerConfig
 from pipeline.common.transport import create_batch_consumer, create_producer
 from pipeline.common.types import PipelineMessage
-from pipeline.verisk.retry.download_handler import RetryHandler
-from pipeline.verisk.schemas.cached import CachedDownloadMessage
-from pipeline.verisk.schemas.results import DownloadResultMessage
-from pipeline.verisk.schemas.tasks import DownloadTaskMessage
-from pipeline.verisk.handlers import FileHandlerRunner
 from pipeline.common.worker_defaults import (
     BATCH_SIZE,
     CONCURRENCY,
     CYCLE_LOG_INTERVAL_SECONDS,
 )
+from pipeline.verisk.handlers import RuleRunner
+from pipeline.verisk.retry.download_handler import RetryHandler
+from pipeline.verisk.schemas.cached import CachedDownloadMessage
+from pipeline.verisk.schemas.results import DownloadResultMessage
+from pipeline.verisk.schemas.tasks import DownloadTaskMessage
 
 logger = logging.getLogger(__name__)
 
@@ -192,7 +192,7 @@ class DownloadWorker:
             topic_key="downloads_results",
         )
 
-        self.handler_runner = FileHandlerRunner(
+        self.handler_runner = RuleRunner(
             producer_factory=lambda topic_key: create_producer(
                 config=config,
                 domain=domain,
@@ -729,7 +729,7 @@ class DownloadWorker:
         # Run file handler if one is registered for this (status_subtype, file_type).
         # Handler results are merged into metadata; side-effect messages (e.g.
         # reinspection events) are produced by the runner. Failures are non-fatal.
-        handler_metadata = await self.handler_runner.run(task_message, cache_path)
+        handler_metadata = await self.handler_runner.run_for_download(task_message, cache_path)
 
         cached_message = CachedDownloadMessage(
             media_id=task_message.media_id,
