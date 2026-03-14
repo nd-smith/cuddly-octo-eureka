@@ -9,7 +9,6 @@ from config.pipeline_config import (
     EventHubConfig,
     PipelineConfig,
     _get_config_value,
-    _parse_bool_env,
 )
 
 
@@ -47,42 +46,6 @@ class TestGetConfigValue:
             # ${UNDEFINED} stays literal, triggering the warning
             result = _get_config_value("MISSING", "${UNDEFINED}")
             assert "${UNDEFINED}" in result
-
-
-# =========================================================================
-# _parse_bool_env
-# =========================================================================
-
-
-class TestParseBoolEnv:
-    def test_true_from_env(self):
-        with patch.dict(os.environ, {"FLAG": "true"}):
-            assert _parse_bool_env("FLAG", False) is True
-
-    def test_1_from_env(self):
-        with patch.dict(os.environ, {"FLAG": "1"}):
-            assert _parse_bool_env("FLAG", False) is True
-
-    def test_yes_from_env(self):
-        with patch.dict(os.environ, {"FLAG": "yes"}):
-            assert _parse_bool_env("FLAG", False) is True
-
-    def test_false_from_env(self):
-        with patch.dict(os.environ, {"FLAG": "false"}):
-            assert _parse_bool_env("FLAG", True) is False
-
-    def test_falls_back_to_yaml_bool(self):
-        with patch.dict(os.environ, {}, clear=True):
-            assert _parse_bool_env("MISSING", True) is True
-            assert _parse_bool_env("MISSING", False) is False
-
-    def test_yaml_string_true(self):
-        with patch.dict(os.environ, {}, clear=True):
-            assert _parse_bool_env("MISSING", "true") is True
-
-    def test_yaml_string_false(self):
-        with patch.dict(os.environ, {}, clear=True):
-            assert _parse_bool_env("MISSING", "false") is False
 
 
 # =========================================================================
@@ -159,87 +122,11 @@ class TestPipelineConfig:
             config = PipelineConfig.load_config(config_file)
         assert config.eventhub is not None
 
-    def test_loads_delta_config(self, tmp_path):
-        data = {
-            "delta": {
-                "verisk": {
-                    "events_table_path": "/delta/events",
-                    "inventory_table_path": "/delta/inventory",
-                }
-            },
-        }
-        config_file = _write_config(tmp_path, data)
-        env = {
-            "EVENTHUB_NAMESPACE_CONNECTION_STRING": "conn_str",
-            "PIPELINE_DOMAIN": "verisk",
-        }
-        with patch.dict(os.environ, env, clear=True):
-            config = PipelineConfig.load_config(config_file)
-        assert config.events_table_path == "/delta/events"
-        assert config.inventory_table_path == "/delta/inventory"
-
-    def test_delta_env_vars_override_yaml(self, tmp_path):
-        data = {}
-        config_file = _write_config(tmp_path, data)
-        env = {
-            "EVENTHUB_NAMESPACE_CONNECTION_STRING": "conn_str",
-            "VERISK_EVENTS_TABLE_PATH": "/env/events",
-            "PIPELINE_DOMAIN": "verisk",
-        }
-        with patch.dict(os.environ, env, clear=True):
-            config = PipelineConfig.load_config(config_file)
-        assert config.events_table_path == "/env/events"
-
-    def test_enable_delta_writes_from_env(self, tmp_path):
-        data = {}
-        config_file = _write_config(tmp_path, data)
-        env = {
-            "EVENTHUB_NAMESPACE_CONNECTION_STRING": "conn_str",
-            "ENABLE_DELTA_WRITES": "false",
-        }
-        with patch.dict(os.environ, env, clear=True):
-            config = PipelineConfig.load_config(config_file)
-        assert config.enable_delta_writes is False
-
-    def test_enable_delta_writes_accepts_1(self, tmp_path):
-        """M4: ENABLE_DELTA_WRITES=1 should be treated as True."""
-        data = {}
-        config_file = _write_config(tmp_path, data)
-        env = {
-            "EVENTHUB_NAMESPACE_CONNECTION_STRING": "conn_str",
-            "ENABLE_DELTA_WRITES": "1",
-        }
-        with patch.dict(os.environ, env, clear=True):
-            config = PipelineConfig.load_config(config_file)
-        assert config.enable_delta_writes is True
-
-    def test_enable_delta_writes_accepts_yes(self, tmp_path):
-        """M4: ENABLE_DELTA_WRITES=yes should be treated as True."""
-        data = {}
-        config_file = _write_config(tmp_path, data)
-        env = {
-            "EVENTHUB_NAMESPACE_CONNECTION_STRING": "conn_str",
-            "ENABLE_DELTA_WRITES": "yes",
-        }
-        with patch.dict(os.environ, env, clear=True):
-            config = PipelineConfig.load_config(config_file)
-        assert config.enable_delta_writes is True
-
-    def test_enable_delta_writes_defaults_true(self, tmp_path):
-        data = {}
-        config_file = _write_config(tmp_path, data)
-        env = {"EVENTHUB_NAMESPACE_CONNECTION_STRING": "conn_str"}
-        with patch.dict(os.environ, env, clear=True):
-            config = PipelineConfig.load_config(config_file)
-        assert config.enable_delta_writes is True
-
-    def test_claimx_delta_table_paths(self, tmp_path):
+    def test_claimx_projects_table_path(self, tmp_path):
         data = {
             "delta": {
                 "claimx": {
-                    "events_table_path": "/claimx/events",
                     "projects_table_path": "/claimx/projects",
-                    "contacts_table_path": "/claimx/contacts",
                 }
             },
         }
@@ -247,9 +134,7 @@ class TestPipelineConfig:
         env = {"EVENTHUB_NAMESPACE_CONNECTION_STRING": "conn_str"}
         with patch.dict(os.environ, env, clear=True):
             config = PipelineConfig.load_config(config_file)
-        assert config.claimx_events_table_path == "/claimx/events"
         assert config.claimx_projects_table_path == "/claimx/projects"
-        assert config.claimx_contacts_table_path == "/claimx/contacts"
 
     def test_missing_config_file_raises(self):
         with pytest.raises(FileNotFoundError):

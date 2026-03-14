@@ -14,13 +14,9 @@ import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
-import pytest
-
 from pipeline.runners.verisk_runners import (
-    run_delta_events_worker,
     run_download_worker,
     run_event_ingester,
-    run_result_processor,
     run_upload_worker,
     run_xact_enrichment_worker,
     run_xact_retry_scheduler,
@@ -92,53 +88,6 @@ class TestRunEventIngester:
             await run_event_ingester(Mock(), Mock(), shutdown, domain="custom")
 
         assert MockWorker.call_args[1]["domain"] == "custom"
-
-
-# ---------------------------------------------------------------------------
-# run_delta_events_worker
-# ---------------------------------------------------------------------------
-
-
-class TestRunDeltaEventsWorker:
-    async def test_delegates_to_execute_worker_with_producer(self):
-        shutdown = asyncio.Event()
-        shutdown.set()
-        kafka_config = Mock()
-
-        with (
-            patch("pipeline.verisk.workers.delta_events_worker.DeltaEventsWorker") as MockWorker,
-            patch(
-                "pipeline.runners.verisk_runners.execute_worker_with_producer",
-                new_callable=AsyncMock,
-            ) as mock_exec,
-        ):
-            await run_delta_events_worker(kafka_config, "/delta/events", shutdown, instance_id=2)
-
-        mock_exec.assert_awaited_once_with(
-            worker_class=MockWorker,
-            kafka_config=kafka_config,
-            domain="verisk",
-            stage_name="xact-delta-writer",
-            shutdown_event=shutdown,
-            worker_kwargs={"events_table_path": "/delta/events"},
-            producer_worker_name="delta_events_writer",
-            instance_id=2,
-        )
-
-    async def test_passes_none_instance_id_by_default(self):
-        shutdown = asyncio.Event()
-        shutdown.set()
-
-        with (
-            patch("pipeline.verisk.workers.delta_events_worker.DeltaEventsWorker"),
-            patch(
-                "pipeline.runners.verisk_runners.execute_worker_with_producer",
-                new_callable=AsyncMock,
-            ) as mock_exec,
-        ):
-            await run_delta_events_worker(Mock(), "/path", shutdown)
-
-        assert mock_exec.call_args[1]["instance_id"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -308,135 +257,3 @@ class TestRunUploadWorker:
 
         mock_exec.assert_awaited_once()
         assert mock_exec.call_args[1]["stage_name"] == "xact-upload"
-
-
-# ---------------------------------------------------------------------------
-# run_result_processor
-# ---------------------------------------------------------------------------
-
-
-class TestRunResultProcessor:
-    async def test_raises_when_delta_enabled_without_inventory_path(self):
-        shutdown = asyncio.Event()
-        kafka_config = Mock()
-
-        with (
-            patch("core.logging.context.set_log_context"),
-            pytest.raises(
-                ValueError,
-                match="inventory_table_path is required when delta writes are enabled",
-            ),
-        ):
-            await run_result_processor(
-                kafka_config,
-                shutdown,
-                enable_delta_writes=True,
-                inventory_table_path="",
-            )
-
-    async def test_does_not_raise_when_delta_disabled_without_inventory_path(self):
-        shutdown = asyncio.Event()
-        shutdown.set()
-        kafka_config = Mock()
-
-        with (
-            patch("core.logging.context.set_log_context"),
-            patch("pipeline.verisk.workers.result_processor.ResultProcessor"),
-            patch(
-                "pipeline.runners.verisk_runners.execute_worker_with_producer",
-                new_callable=AsyncMock,
-            ),
-        ):
-            # Should not raise
-            await run_result_processor(
-                kafka_config,
-                shutdown,
-                enable_delta_writes=False,
-                inventory_table_path="",
-            )
-
-    async def test_delegates_with_delta_paths_when_enabled(self):
-        shutdown = asyncio.Event()
-        shutdown.set()
-        kafka_config = Mock()
-
-        with (
-            patch("core.logging.context.set_log_context"),
-            patch("pipeline.verisk.workers.result_processor.ResultProcessor") as MockRP,
-            patch(
-                "pipeline.runners.verisk_runners.execute_worker_with_producer",
-                new_callable=AsyncMock,
-            ) as mock_exec,
-        ):
-            await run_result_processor(
-                kafka_config,
-                shutdown,
-                enable_delta_writes=True,
-                inventory_table_path="/delta/inventory",
-                failed_table_path="/delta/failed",
-                instance_id=4,
-            )
-
-        mock_exec.assert_awaited_once()
-        kwargs = mock_exec.call_args[1]
-        assert kwargs["worker_class"] == MockRP
-        assert kwargs["domain"] == "verisk"
-        assert kwargs["stage_name"] == "xact-result-processor"
-        assert kwargs["instance_id"] == 4
-        assert kwargs["producer_worker_name"] == "result_processor"
-
-        worker_kwargs = kwargs["worker_kwargs"]
-        assert worker_kwargs["inventory_table_path"] == "/delta/inventory"
-        assert worker_kwargs["failed_table_path"] == "/delta/failed"
-        assert worker_kwargs["batch_size"] == 2000
-        assert worker_kwargs["batch_timeout_seconds"] == 5.0
-
-    async def test_nullifies_paths_when_delta_disabled(self):
-        shutdown = asyncio.Event()
-        shutdown.set()
-        kafka_config = Mock()
-
-        with (
-            patch("core.logging.context.set_log_context"),
-            patch("pipeline.verisk.workers.result_processor.ResultProcessor"),
-            patch(
-                "pipeline.runners.verisk_runners.execute_worker_with_producer",
-                new_callable=AsyncMock,
-            ) as mock_exec,
-        ):
-            await run_result_processor(
-                kafka_config,
-                shutdown,
-                enable_delta_writes=False,
-                inventory_table_path="/delta/inventory",
-                failed_table_path="/delta/failed",
-            )
-
-        worker_kwargs = mock_exec.call_args[1]["worker_kwargs"]
-        assert worker_kwargs["inventory_table_path"] is None
-        assert worker_kwargs["failed_table_path"] is None
-
-    async def test_nullifies_failed_path_when_empty_string(self):
-        shutdown = asyncio.Event()
-        shutdown.set()
-        kafka_config = Mock()
-
-        with (
-            patch("core.logging.context.set_log_context"),
-            patch("pipeline.verisk.workers.result_processor.ResultProcessor"),
-            patch(
-                "pipeline.runners.verisk_runners.execute_worker_with_producer",
-                new_callable=AsyncMock,
-            ) as mock_exec,
-        ):
-            await run_result_processor(
-                kafka_config,
-                shutdown,
-                enable_delta_writes=True,
-                inventory_table_path="/delta/inventory",
-                failed_table_path="",
-            )
-
-        worker_kwargs = mock_exec.call_args[1]["worker_kwargs"]
-        assert worker_kwargs["inventory_table_path"] == "/delta/inventory"
-        assert worker_kwargs["failed_table_path"] is None

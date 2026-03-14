@@ -2,10 +2,8 @@
 
 Contains all runner functions for ClaimX pipeline workers:
 - Event ingestion (Event Hub)
-- Enrichment with entity extraction
+- Enrichment
 - Download/Upload
-- Delta writes (events and entities)
-- Result processing
 - Retry scheduling
 """
 
@@ -14,7 +12,6 @@ import logging
 from pathlib import Path
 
 from pipeline.runners.common import (
-    execute_worker_with_producer,
     execute_worker_with_shutdown,
 )
 
@@ -45,7 +42,6 @@ async def run_claimx_event_ingester(
 async def run_claimx_enrichment_worker(
     kafka_config,
     shutdown_event: asyncio.Event,
-    enable_delta_writes: bool = True,
     claimx_projects_table_path: str = "",
     instance_id: int | None = None,
 ):
@@ -57,7 +53,6 @@ async def run_claimx_enrichment_worker(
     worker = ClaimXEnrichmentWorker(
         config=kafka_config,
         domain="claimx",
-        enable_delta_writes=enable_delta_writes,
         projects_table_path=claimx_projects_table_path,
         instance_id=instance_id,
     )
@@ -110,52 +105,6 @@ async def run_claimx_upload_worker(
     )
 
 
-async def run_claimx_result_processor(
-    kafka_config,
-    pipeline_config,
-    shutdown_event: asyncio.Event,
-    instance_id: int | None = None,
-):
-    """ClaimX result processor."""
-    from pipeline.claimx.workers.result_processor import ClaimXResultProcessor
-
-    processor = ClaimXResultProcessor(
-        config=kafka_config,
-        inventory_table_path=pipeline_config.claimx_inventory_table_path,
-        instance_id=instance_id,
-    )
-    await execute_worker_with_shutdown(
-        processor,
-        "claimx-result-processor",
-        shutdown_event,
-        instance_id=instance_id,
-    )
-
-
-async def run_claimx_delta_events_worker(
-    kafka_config,
-    events_table_path: str,
-    shutdown_event: asyncio.Event,
-    instance_id: int | None = None,
-):
-    """Consumes deduplicated enrichment tasks from enrichment_pending topic
-    and writes to claimx_events Delta table."""
-    from pipeline.claimx.workers.delta_events_worker import (
-        ClaimXDeltaEventsWorker,
-    )
-
-    await execute_worker_with_producer(
-        worker_class=ClaimXDeltaEventsWorker,
-        kafka_config=kafka_config,
-        domain="claimx",
-        stage_name="claimx-delta-writer",
-        shutdown_event=shutdown_event,
-        worker_kwargs={"events_table_path": events_table_path},
-        producer_worker_name="delta_events_writer",
-        instance_id=instance_id,
-    )
-
-
 async def run_claimx_retry_scheduler(
     kafka_config,
     shutdown_event: asyncio.Event,
@@ -175,43 +124,5 @@ async def run_claimx_retry_scheduler(
         scheduler,
         stage_name="claimx-retry-scheduler",
         shutdown_event=shutdown_event,
-        instance_id=instance_id,
-    )
-
-
-async def run_claimx_entity_delta_worker(
-    kafka_config,
-    *,
-    projects_table_path: str,
-    contacts_table_path: str,
-    media_table_path: str,
-    tasks_table_path: str,
-    task_templates_table_path: str,
-    external_links_table_path: str,
-    video_collab_table_path: str,
-    shutdown_event: asyncio.Event,
-    instance_id: int | None = None,
-):
-    """Consumes EntityRowsMessage from claimx.entities.rows and writes to Delta tables."""
-    from pipeline.claimx.workers.entity_delta_worker import (
-        ClaimXEntityDeltaWorker,
-    )
-
-    worker = ClaimXEntityDeltaWorker(
-        config=kafka_config,
-        domain="claimx",
-        projects_table_path=projects_table_path,
-        contacts_table_path=contacts_table_path,
-        media_table_path=media_table_path,
-        tasks_table_path=tasks_table_path,
-        task_templates_table_path=task_templates_table_path,
-        external_links_table_path=external_links_table_path,
-        video_collab_table_path=video_collab_table_path,
-        instance_id=instance_id,
-    )
-    await execute_worker_with_shutdown(
-        worker,
-        "claimx-entity-writer",
-        shutdown_event,
         instance_id=instance_id,
     )

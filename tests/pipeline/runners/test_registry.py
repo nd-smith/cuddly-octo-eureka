@@ -27,7 +27,7 @@ class TestWorkerRegistry:
         """Registry contains all expected worker definitions."""
         # XACT workers
         assert "xact-event-ingester" in WORKER_REGISTRY
-        assert "xact-delta-writer" in WORKER_REGISTRY
+        assert "xact-retry-scheduler" in WORKER_REGISTRY
         assert "xact-enricher" in WORKER_REGISTRY
         assert "xact-download" in WORKER_REGISTRY
         assert "xact-upload" in WORKER_REGISTRY
@@ -37,7 +37,11 @@ class TestWorkerRegistry:
         assert "claimx-enricher" in WORKER_REGISTRY
         assert "claimx-downloader" in WORKER_REGISTRY
         assert "claimx-uploader" in WORKER_REGISTRY
-        assert "claimx-delta-writer" in WORKER_REGISTRY
+        assert "claimx-retry-scheduler" in WORKER_REGISTRY
+
+        # Other workers
+        assert "itel-cabinet" in WORKER_REGISTRY
+        assert "eventhub-ui" in WORKER_REGISTRY
 
     def test_registry_entries_have_runner(self):
         """All non-deprecated workers have runner function."""
@@ -142,7 +146,6 @@ class TestRunWorkerFromRegistry:
                 worker_name="test-worker",
                 pipeline_config=pipeline_config,
                 shutdown_event=shutdown_event,
-                enable_delta_writes=True,
                 eventhub_config=Mock(),
                 local_kafka_config=Mock(),
             )
@@ -191,24 +194,3 @@ class TestRunWorkerFromRegistry:
                 shutdown_event=shutdown_event,
             )
 
-    @pytest.mark.asyncio
-    async def test_passes_enable_delta_writes(self):
-        """Passes enable_delta_writes when runner accepts it."""
-
-        async def mock_runner(enable_delta_writes, shutdown_event):
-            assert enable_delta_writes is False
-
-        pipeline_config = Mock()
-        pipeline_config.domain = "claimx"
-        shutdown_event = asyncio.Event()
-
-        with patch.dict(
-            "pipeline.runners.registry.WORKER_REGISTRY",
-            {"test-worker": {"runner": mock_runner}},
-        ):
-            await run_worker_from_registry(
-                worker_name="test-worker",
-                pipeline_config=pipeline_config,
-                shutdown_event=shutdown_event,
-                enable_delta_writes=False,
-            )

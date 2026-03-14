@@ -8,7 +8,6 @@ import asyncio
 import hashlib
 import orjson
 import logging
-import uuid
 from datetime import UTC, datetime
 from typing import Any
 
@@ -38,7 +37,6 @@ from pipeline.common.worker_defaults import CYCLE_LOG_INTERVAL_SECONDS
 from pipeline.common.health import HealthCheckServer
 from pipeline.common.log_fields import producer_log_fields
 from pipeline.common.metrics import (
-    record_delta_write,
     record_processing_error,
     record_retry_terminal,
 )
@@ -58,8 +56,6 @@ class ClaimXEnrichmentWorker:
 
     Architecture:
     - Event routing via handler registry
-    - Single-task processing (no batching - delta writer handles batching)
-    - Entity data writes to 7 Delta tables
     - Download task generation for media files
 
     Transport Layer:
@@ -77,7 +73,6 @@ class ClaimXEnrichmentWorker:
         self,
         config: MessageConfig,
         domain: str = "claimx",
-        enable_delta_writes: bool = True,
         producer_config: MessageConfig | None = None,
         projects_table_path: str = "",
         instance_id: str | None = None,
@@ -89,8 +84,6 @@ class ClaimXEnrichmentWorker:
         self.instance_id = instance_id
         self.enrichment_topic = config.get_topic(domain, "enrichment_pending")
         self.download_topic = config.get_topic(domain, "downloads_pending")
-        self.entity_rows_topic = config.get_topic(domain, "enriched")
-        self.enable_delta_writes = enable_delta_writes
 
         # Only consume from pending topic
         # Unified retry scheduler handles routing retry messages back to pending
@@ -173,7 +166,6 @@ class ClaimXEnrichmentWorker:
                 "consumer_group": config.get_consumer_group(domain, "enrichment_worker"),
                 "enrichment_topic": self.enrichment_topic,
                 "download_topic": self.download_topic,
-                "delta_writes_enabled": self.enable_delta_writes,
                 "retry_delays": self._retry_delays,
                 "max_retries": self._max_retries,
                 "project_cache_preload": self._preload_cache_from_delta,
@@ -497,11 +489,7 @@ class ClaimXEnrichmentWorker:
         if not project_ids:
             return
 
-        merged_rows = await self._fetch_and_merge_project_rows(project_ids)
-
-        if self.enable_delta_writes and not merged_rows.is_empty():
-            tasks_for_dispatch = [task for _, task, _ in parsed]
-            await self._produce_entity_rows(merged_rows, tasks_for_dispatch)
+        await self._fetch_and_merge_project_rows(project_ids)
 
     async def _fetch_and_merge_project_rows(
         self, project_ids: set[str],
@@ -595,10 +583,6 @@ class ClaimXEnrichmentWorker:
         all_entity_rows, new_failures = await self._tally_and_route_results(all_results)
         permanent_failures.extend(new_failures)
 
-        if self.enable_delta_writes and not all_entity_rows.is_empty():
-            all_tasks = [task for _, task, _ in parsed]
-            await self._produce_entity_rows(all_entity_rows, all_tasks)
-
         if all_entity_rows.media:
             download_tasks = create_download_tasks_from_media(all_entity_rows.media)
             if download_tasks:
@@ -670,26 +654,6 @@ class ClaimXEnrichmentWorker:
         )
 
         await self._process_single_task(task)
-
-    async def _dispatch_entity_rows(
-        self,
-        task: ClaimXEnrichmentTask,
-        entity_rows: EntityRowsMessage,
-    ) -> None:
-        """
-        Dispatch entity rows to Kafka for Delta Lake writing.
-
-        Awaits entity row production to ensure writes complete before offset commit.
-        Critical for preventing data loss (Issue #38).
-
-        Args:
-            task: Original enrichment task
-            entity_rows: Entity rows to produce
-        """
-        if not self.enable_delta_writes or entity_rows.is_empty():
-            return
-
-        await self._produce_entity_rows(entity_rows, [task])
 
     async def _dispatch_download_tasks(
         self,
@@ -894,9 +858,7 @@ class ClaimXEnrichmentWorker:
 
         if task.project_id:
             try:
-                project_rows = await self._ensure_project_exists(task.project_id)
-                if not project_rows.is_empty():
-                    await self._dispatch_entity_rows(task, project_rows)
+                await self._ensure_project_exists(task.project_id)
             except Exception:
                 logger.debug(
                     "Pre-flight project verification failed, handler will retry",
@@ -947,7 +909,6 @@ class ClaimXEnrichmentWorker:
                 record_retry_terminal(self.domain, "success", task.retry_count)
 
             await self._route_itel_events(task, event, entity_rows)
-            await self._dispatch_entity_rows(task, entity_rows)
             download_task_count = await self._dispatch_download_tasks(entity_rows)
 
             elapsed_ms = (datetime.now(UTC) - start_time).total_seconds() * 1000
@@ -1028,62 +989,6 @@ class ClaimXEnrichmentWorker:
             int(project_id),
             trace_id=None,
         )
-
-    async def _produce_entity_rows(
-        self,
-        entity_rows: EntityRowsMessage,
-        tasks: list[ClaimXEnrichmentTask],
-    ) -> None:
-        """Write entity rows to Kafka. On failure, routes all tasks to retry/DLQ."""
-        batch_id = uuid.uuid4().hex[:8]
-        trace_ids = [task.trace_id for task in tasks[:5]]
-
-        try:
-            trace_id = tasks[0].trace_id if tasks else batch_id
-            entity_rows.trace_id = trace_id
-            await asyncio.wait_for(
-                self.producer.send(
-                    value=entity_rows,
-                    key=trace_id,
-                    headers={"trace_id": trace_id},
-                ),
-                timeout=30.0,
-            )
-
-            logger.info(
-                "Produced entity rows batch",
-                extra={
-                    "batch_id": batch_id,
-                    "trace_id": trace_id,
-                    "trace_ids": trace_ids,
-                    "row_count": entity_rows.row_count(),
-                },
-            )
-
-        except Exception as e:
-            logger.error(
-                "Error writing entities to Delta - routing batch to retry",
-                extra={
-                    "batch_id": batch_id,
-                    "trace_id": trace_id,
-                    "trace_ids": trace_ids,
-                    "row_count": entity_rows.row_count(),
-                    "task_count": len(tasks),
-                    "error_category": ErrorCategory.TRANSIENT.value,
-                    "error": str(e)[:200],
-                },
-                exc_info=True,
-            )
-
-            record_delta_write(
-                table="claimx_entities_produce",
-                event_count=entity_rows.row_count(),
-                success=False,
-            )
-
-            error_category = ErrorCategory.TRANSIENT
-            for task in tasks:
-                await self._handle_enrichment_failure(task, e, error_category)
 
     async def _produce_download_tasks(
         self,

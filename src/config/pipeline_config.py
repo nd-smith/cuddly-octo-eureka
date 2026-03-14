@@ -8,7 +8,6 @@ Architecture:
 Workers:
     - EventIngesterWorker: Reads from Event Hub, produces enrichment tasks
     - DownloadWorker: Reads/writes via EventHub
-    - ResultProcessor: Reads from EventHub
 """
 
 import logging
@@ -21,18 +20,6 @@ from config.config import DEFAULT_CONFIG_FILE, MessageConfig
 from config.config import get_config_value as _get_config_value
 
 logger = logging.getLogger(__name__)
-
-
-def _parse_bool_env(env_var: str, yaml_value: Any) -> bool:
-    """Parse boolean from env var or yaml value."""
-    env_str = os.getenv(env_var)
-    if env_str is not None:
-        return env_str.lower() in ("true", "1", "yes")
-    if isinstance(yaml_value, bool):
-        return yaml_value
-    if isinstance(yaml_value, str):
-        return yaml_value.lower() in ("true", "1", "yes")
-    return bool(yaml_value)
 
 
 def _load_config_data(config_path: Path) -> dict[str, Any]:
@@ -130,27 +117,13 @@ class EventHubConfig:
 
 @dataclass
 class PipelineConfig:
-    """Complete pipeline configuration (EventHub + Delta Lake paths)."""
+    """Complete pipeline configuration (EventHub + read-only Delta Lake paths)."""
 
     eventhub: EventHubConfig | None = None
     domain: str = "verisk"  # OneLake routing domain ("verisk" or "claimx")
 
-    # Verisk Delta table paths
-    enable_delta_writes: bool = True
-    events_table_path: str = ""
-    inventory_table_path: str = ""
-    failed_table_path: str = ""
-
-    # ClaimX Delta table paths
-    claimx_events_table_path: str = ""
+    # ClaimX project cache (read-only, used by enrichment worker)
     claimx_projects_table_path: str = ""
-    claimx_contacts_table_path: str = ""
-    claimx_inventory_table_path: str = ""
-    claimx_media_table_path: str = ""
-    claimx_tasks_table_path: str = ""
-    claimx_task_templates_table_path: str = ""
-    claimx_external_links_table_path: str = ""
-    claimx_video_collab_table_path: str = ""
 
     @classmethod
     def load_config(cls, config_path: Path | None = None) -> "PipelineConfig":
@@ -162,64 +135,13 @@ class PipelineConfig:
 
         delta_config = yaml_data.get("delta", {})
         domain = os.getenv("PIPELINE_DOMAIN", "verisk")
-        domain_delta_config = delta_config.get(domain, {})
-
-        # Enable delta writes: env var > yaml > default True
-        enable_delta_writes = _parse_bool_env(
-            "ENABLE_DELTA_WRITES", delta_config.get("enable_writes", True)
-        )
 
         return cls(
             eventhub=eventhub_config,
             domain=domain,
-            enable_delta_writes=enable_delta_writes,
-            events_table_path=_get_config_value(
-                "VERISK_EVENTS_TABLE_PATH",
-                domain_delta_config.get("events_table_path", ""),
-            ),
-            inventory_table_path=_get_config_value(
-                "VERISK_INVENTORY_TABLE_PATH",
-                domain_delta_config.get("inventory_table_path", ""),
-            ),
-            failed_table_path=_get_config_value(
-                "VERISK_FAILED_TABLE_PATH",
-                domain_delta_config.get("failed_table_path", ""),
-            ),
-            claimx_events_table_path=_get_config_value(
-                "CLAIMX_DELTA_EVENTS_TABLE",
-                delta_config.get("claimx", {}).get("events_table_path", ""),
-            ),
             claimx_projects_table_path=_get_config_value(
                 "CLAIMX_PROJECTS_TABLE_PATH",
                 delta_config.get("claimx", {}).get("projects_table_path", ""),
-            ),
-            claimx_contacts_table_path=_get_config_value(
-                "CLAIMX_CONTACTS_TABLE_PATH",
-                delta_config.get("claimx", {}).get("contacts_table_path", ""),
-            ),
-            claimx_inventory_table_path=_get_config_value(
-                "CLAIMX_INVENTORY_TABLE_PATH",
-                delta_config.get("claimx", {}).get("inventory_table_path", ""),
-            ),
-            claimx_media_table_path=_get_config_value(
-                "CLAIMX_MEDIA_TABLE_PATH",
-                delta_config.get("claimx", {}).get("media_table_path", ""),
-            ),
-            claimx_tasks_table_path=_get_config_value(
-                "CLAIMX_TASKS_TABLE_PATH",
-                delta_config.get("claimx", {}).get("tasks_table_path", ""),
-            ),
-            claimx_task_templates_table_path=_get_config_value(
-                "CLAIMX_TASK_TEMPLATES_TABLE_PATH",
-                delta_config.get("claimx", {}).get("task_templates_table_path", ""),
-            ),
-            claimx_external_links_table_path=_get_config_value(
-                "CLAIMX_EXTERNAL_LINKS_TABLE_PATH",
-                delta_config.get("claimx", {}).get("external_links_table_path", ""),
-            ),
-            claimx_video_collab_table_path=_get_config_value(
-                "CLAIMX_VIDEO_COLLAB_TABLE_PATH",
-                delta_config.get("claimx", {}).get("video_collab_table_path", ""),
             ),
         )
 

@@ -76,87 +76,6 @@ class MockOneLakeClient:
         self.upload_count = 0
 
 
-class MockDeltaEventsWriter:
-    """Mock Delta events writer for testing without Delta Lake dependencies."""
-
-    def __init__(self, table_path: str = "", dedupe_window_hours: int = 24):
-        self.table_path = table_path
-        self.dedupe_window_hours = dedupe_window_hours
-        self.written_events: list[dict] = []
-        self.write_count = 0
-        self.dedupe_hits = 0
-        self._seen_trace_ids = set()
-
-    async def write_event(self, event: dict) -> None:
-        if hasattr(event, "model_dump"):
-            event_dict = event.model_dump(mode="json")
-            trace_id = event.trace_id
-        else:
-            event_dict = event
-            trace_id = event.get("trace_id")
-
-        if trace_id in self._seen_trace_ids:
-            self.dedupe_hits += 1
-            return
-
-        self._seen_trace_ids.add(trace_id)
-        self.written_events.append(event_dict)
-        self.write_count += 1
-
-    def get_events_by_trace_id(self, trace_id: str) -> list[dict]:
-        return [e for e in self.written_events if e.get("trace_id") == trace_id]
-
-    def clear(self) -> None:
-        self.written_events.clear()
-        self.write_count = 0
-        self.dedupe_hits = 0
-        self._seen_trace_ids.clear()
-
-
-class MockDeltaInventoryWriter:
-    """Mock Delta inventory writer for testing without Delta Lake dependencies."""
-
-    def __init__(self, table_path: str = ""):
-        self.table_path = table_path
-        self.inventory_records: list[dict] = []
-        self.write_count = 0
-        self.merge_count = 0
-        self._record_keys = {}
-
-    async def write_results(self, results: list) -> bool:
-        for result in results:
-            if hasattr(result, "model_dump"):
-                record = result.model_dump(mode="json")
-                trace_id = result.trace_id
-                attachment_url = result.attachment_url
-            else:
-                record = result
-                trace_id = result.get("trace_id")
-                attachment_url = result.get("attachment_url")
-
-            key = (trace_id, attachment_url)
-
-            if key in self._record_keys:
-                idx = self._record_keys[key]
-                self.inventory_records[idx] = record
-                self.merge_count += 1
-            else:
-                self._record_keys[key] = len(self.inventory_records)
-                self.inventory_records.append(record)
-
-        self.write_count += 1
-        return True
-
-    def get_records_by_trace_id(self, trace_id: str) -> list[dict]:
-        return [r for r in self.inventory_records if r.get("trace_id") == trace_id]
-
-    def clear(self) -> None:
-        self.inventory_records.clear()
-        self.write_count = 0
-        self.merge_count = 0
-        self._record_keys.clear()
-
-
 # =============================================================================
 # Mock Fixtures - Available for ALL tests (no Docker required)
 # =============================================================================
@@ -169,33 +88,12 @@ def mock_onelake_client() -> MockOneLakeClient:
 
 
 @pytest.fixture
-def mock_delta_events_writer() -> MockDeltaEventsWriter:
-    """Provide mock Delta events writer for testing (no Docker required)."""
-    return MockDeltaEventsWriter(
-        table_path="abfss://test@onelake.dfs.fabric.microsoft.com/lakehouse/Tables/xact_events",
-        dedupe_window_hours=24,
-    )
-
-
-@pytest.fixture
-def mock_delta_inventory_writer() -> MockDeltaInventoryWriter:
-    """Provide mock Delta inventory writer for testing (no Docker required)."""
-    return MockDeltaInventoryWriter(
-        table_path="abfss://test@onelake.dfs.fabric.microsoft.com/lakehouse/Tables/xact_attachments"
-    )
-
-
-@pytest.fixture
 def mock_storage(
     mock_onelake_client: MockOneLakeClient,
-    mock_delta_events_writer: MockDeltaEventsWriter,
-    mock_delta_inventory_writer: MockDeltaInventoryWriter,
 ) -> dict[str, object]:
     """Provide all mock storage components as a dict (no Docker required)."""
     return {
         "onelake": mock_onelake_client,
-        "delta_events": mock_delta_events_writer,
-        "delta_inventory": mock_delta_inventory_writer,
     }
 
     # =============================================================================
@@ -545,18 +443,11 @@ def mock_onelake_client_with_config(kafka_config) -> MockOneLakeClient:
 @pytest.fixture
 async def event_ingester_worker(
     test_kafka_config,
-    mock_delta_events_writer: MockDeltaEventsWriter,
-    monkeypatch,
 ) -> AsyncGenerator:
-    """Provide event ingester worker with mocked Delta writer."""
+    """Provide event ingester worker."""
     from pipeline.verisk.workers.event_ingester import EventIngesterWorker
 
-    monkeypatch.setattr(
-        "pipeline.verisk.workers.event_ingester.DeltaEventsWriter",
-        lambda *args, **kwargs: mock_delta_events_writer,
-    )
-
-    worker = EventIngesterWorker(config=test_kafka_config, enable_delta_writes=True)
+    worker = EventIngesterWorker(config=test_kafka_config)
 
     yield worker
 
@@ -585,41 +476,12 @@ async def download_worker(
 
 
 @pytest.fixture
-async def result_processor(
-    test_kafka_config,
-    mock_delta_inventory_writer: MockDeltaInventoryWriter,
-    monkeypatch,
-) -> AsyncGenerator:
-    """Provide result processor with mocked Delta writer."""
-    from pipeline.verisk.workers.result_processor import ResultProcessor
-
-    monkeypatch.setattr(
-        "pipeline.verisk.workers.result_processor.DeltaInventoryWriter",
-        lambda *args, **kwargs: mock_delta_inventory_writer,
-    )
-
-    processor = ResultProcessor(
-        config=test_kafka_config,
-        inventory_table_path="abfss://test@onelake.dfs.fabric.microsoft.com/lakehouse/Tables/xact_attachments",
-        batch_size=10,
-        batch_timeout_seconds=1.0,
-    )
-
-    yield processor
-
-    if processor._consumer.is_running:
-        await processor.stop()
-
-
-@pytest.fixture
 def all_workers(
     event_ingester_worker,
     download_worker,
-    result_processor,
 ) -> dict[str, object]:
     """Provide all workers as a dict for E2E tests."""
     return {
         "event_ingester": event_ingester_worker,
         "download_worker": download_worker,
-        "result_processor": result_processor,
     }

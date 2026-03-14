@@ -11,9 +11,6 @@ WORKER_REGISTRY: dict[str, dict[str, Any]] = {
     "xact-event-ingester": {
         "runner": verisk_runners.run_event_ingester,
     },
-    "xact-delta-writer": {
-        "runner": verisk_runners.run_delta_events_worker,
-    },
     "xact-retry-scheduler": {
         "runner": verisk_runners.run_xact_retry_scheduler,
     },
@@ -25,9 +22,6 @@ WORKER_REGISTRY: dict[str, dict[str, Any]] = {
     },
     "xact-upload": {
         "runner": verisk_runners.run_upload_worker,
-    },
-    "xact-result-processor": {
-        "runner": verisk_runners.run_result_processor,
     },
     # ClaimX workers
     "claimx-ingester": {
@@ -42,17 +36,8 @@ WORKER_REGISTRY: dict[str, dict[str, Any]] = {
     "claimx-uploader": {
         "runner": claimx_runners.run_claimx_upload_worker,
     },
-    "claimx-result-processor": {
-        "runner": claimx_runners.run_claimx_result_processor,
-    },
-    "claimx-delta-writer": {
-        "runner": claimx_runners.run_claimx_delta_events_worker,
-    },
     "claimx-retry-scheduler": {
         "runner": claimx_runners.run_claimx_retry_scheduler,
-    },
-    "claimx-entity-writer": {
-        "runner": claimx_runners.run_claimx_entity_delta_worker,
     },
     # App workers
     "itel-cabinet": {
@@ -64,40 +49,10 @@ WORKER_REGISTRY: dict[str, dict[str, Any]] = {
 }
 
 
-def _get_worker_table_paths(worker_name: str, pipeline_config) -> dict[str, str]:
-    """Return worker-specific table path kwargs for the given worker."""
-    table_path_map = {
-        "xact-delta-writer": {
-            "events_table_path": pipeline_config.events_table_path,
-        },
-        "xact-result-processor": {
-            "inventory_table_path": pipeline_config.inventory_table_path,
-            "failed_table_path": pipeline_config.failed_table_path,
-        },
-        "claimx-enricher": {
-            "claimx_projects_table_path": pipeline_config.claimx_projects_table_path,
-        },
-        "claimx-delta-writer": {
-            "events_table_path": pipeline_config.claimx_events_table_path,
-        },
-        "claimx-entity-writer": {
-            "projects_table_path": pipeline_config.claimx_projects_table_path,
-            "contacts_table_path": pipeline_config.claimx_contacts_table_path,
-            "media_table_path": pipeline_config.claimx_media_table_path,
-            "tasks_table_path": pipeline_config.claimx_tasks_table_path,
-            "task_templates_table_path": pipeline_config.claimx_task_templates_table_path,
-            "external_links_table_path": pipeline_config.claimx_external_links_table_path,
-            "video_collab_table_path": pipeline_config.claimx_video_collab_table_path,
-        },
-    }
-    return table_path_map.get(worker_name, {})
-
-
 async def run_worker_from_registry(
     worker_name: str,
     pipeline_config,
     shutdown_event: asyncio.Event,
-    enable_delta_writes: bool = True,
     eventhub_config=None,
     local_kafka_config=None,
     instance_id: int | None = None,
@@ -112,10 +67,9 @@ async def run_worker_from_registry(
 
     worker_def = WORKER_REGISTRY[worker_name]
 
-    kwargs = {
+    kwargs: dict[str, Any] = {
         "pipeline_config": pipeline_config,
         "shutdown_event": shutdown_event,
-        "enable_delta_writes": enable_delta_writes,
         "eventhub_config": eventhub_config,
         "local_kafka_config": local_kafka_config,
         "kafka_config": local_kafka_config,
@@ -125,7 +79,9 @@ async def run_worker_from_registry(
     if instance_id is not None:
         kwargs["instance_id"] = instance_id
 
-    kwargs.update(_get_worker_table_paths(worker_name, pipeline_config))
+    # claimx-enricher needs the projects table path for project cache
+    if worker_name == "claimx-enricher":
+        kwargs["claimx_projects_table_path"] = pipeline_config.claimx_projects_table_path
 
     # Filter kwargs to match runner's signature (unless it accepts **kwargs)
     runner = worker_def["runner"]

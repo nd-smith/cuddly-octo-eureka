@@ -16,7 +16,6 @@ Design Decisions:
 """
 
 from pipeline.verisk.schemas.cached import CachedDownloadMessage
-from pipeline.common.schemas.delta_batch import FailedDeltaBatch
 from pipeline.verisk.schemas.events import EventMessage
 from pipeline.verisk.schemas.models import XACT_PRIMARY_KEYS, EventRecord, Task
 from pipeline.verisk.schemas.results import (
@@ -31,7 +30,6 @@ __all__ = [
     "CachedDownloadMessage",
     "DownloadResultMessage",
     "FailedDownloadMessage",
-    "FailedDeltaBatch",
     "EventRecord",
     "Task",
     "XACT_PRIMARY_KEYS",

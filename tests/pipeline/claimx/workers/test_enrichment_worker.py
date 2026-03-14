@@ -9,7 +9,6 @@ Test Coverage:
     - Error handling and categorization
     - Retry/DLQ routing
     - Project cache integration
-    - Entity row dispatch
     - Download task creation
     - Concurrent processing
 
@@ -183,19 +182,6 @@ class TestEnrichmentWorkerInitialization:
             # Verify ProjectCache was instantiated (even if the ttl_seconds param is currently broken)
             assert mock_cache_class.called
 
-    def test_delta_writes_enabled_by_default(self, mock_config):
-        """Worker enables delta writes by default."""
-        with patch("pipeline.claimx.workers.enrichment_worker.ProjectCache"):
-            worker = ClaimXEnrichmentWorker(config=mock_config)
-
-            assert worker.enable_delta_writes is True
-
-    def test_delta_writes_can_be_disabled(self, mock_config):
-        """Worker respects enable_delta_writes flag."""
-        with patch("pipeline.claimx.workers.enrichment_worker.ProjectCache"):
-            worker = ClaimXEnrichmentWorker(config=mock_config, enable_delta_writes=False)
-
-            assert worker.enable_delta_writes is False
 
 
 class TestEnrichmentWorkerLifecycle:
@@ -561,59 +547,6 @@ class TestEnrichmentWorkerErrorHandling:
         assert call_args[0][2] == ErrorCategory.UNKNOWN
 
 
-class TestEnrichmentWorkerEntityDispatch:
-    """Test entity row dispatch."""
-
-    @pytest.mark.asyncio
-    async def test_entity_rows_dispatched_when_delta_enabled(
-        self, mock_config, sample_enrichment_task, patched_project_cache
-    ):
-        """Worker dispatches entity rows when delta writes enabled."""
-        worker = ClaimXEnrichmentWorker(config=mock_config, enable_delta_writes=True)
-        worker._produce_entity_rows = AsyncMock()
-
-        entity_rows = EntityRowsMessage()
-        entity_rows.projects = [{"project_id": "proj-123"}]
-
-        await worker._dispatch_entity_rows(sample_enrichment_task, entity_rows)
-
-        # Verify entity rows were produced
-        assert worker._produce_entity_rows.called
-        produced_rows = worker._produce_entity_rows.call_args[0][0]
-        assert len(produced_rows.projects) == 1
-
-    @pytest.mark.asyncio
-    async def test_entity_rows_not_dispatched_when_delta_disabled(
-        self, mock_config, sample_enrichment_task, patched_project_cache
-    ):
-        """Worker skips entity dispatch when delta writes disabled."""
-        worker = ClaimXEnrichmentWorker(config=mock_config, enable_delta_writes=False)
-        worker._produce_entity_rows = AsyncMock()
-
-        entity_rows = EntityRowsMessage()
-        entity_rows.projects = [{"project_id": "proj-123"}]
-
-        await worker._dispatch_entity_rows(sample_enrichment_task, entity_rows)
-
-        # Verify entity rows were NOT produced
-        assert not worker._produce_entity_rows.called
-
-    @pytest.mark.asyncio
-    async def test_empty_entity_rows_not_dispatched(
-        self, mock_config, sample_enrichment_task, patched_project_cache
-    ):
-        """Worker skips dispatch for empty entity rows."""
-        worker = ClaimXEnrichmentWorker(config=mock_config, enable_delta_writes=True)
-        worker._produce_entity_rows = AsyncMock()
-
-        entity_rows = EntityRowsMessage()  # Empty
-
-        await worker._dispatch_entity_rows(sample_enrichment_task, entity_rows)
-
-        # Verify empty rows were not produced
-        assert not worker._produce_entity_rows.called
-
-
 class TestEnrichmentWorkerDownloadTasks:
     """Test download task creation and dispatch."""
 
@@ -695,47 +628,7 @@ class TestEnrichmentWorkerProjectCache:
 
 
 class TestEnrichmentWorkerPreflightFix:
-    """Tests for C3 and H4 fixes."""
-
-    @pytest.mark.asyncio
-    async def test_preflight_passes_all_tasks_for_entity_row_dispatch(
-        self, mock_config, patched_project_cache
-    ):
-        """Preflight passes all tasks (not just first) for entity row dispatch (C3 fix)."""
-        worker = ClaimXEnrichmentWorker(config=mock_config)
-        worker._produce_entity_rows = AsyncMock()
-
-        # Create 3 parsed entries
-        tasks = []
-        parsed = []
-        for i in range(3):
-            task = ClaimXEnrichmentTask(
-                trace_id=f"evt-{i}",
-                event_type="PROJECT_CREATED",
-                project_id="proj-456",
-                retry_count=0,
-                created_at=datetime.now(UTC),
-                ingested_at=datetime.now(UTC),
-            )
-            msg = PipelineMessage(
-                topic="test", partition=0, offset=i, key=b"key",
-                value=task.model_dump_json().encode(), timestamp=None, headers=None,
-            )
-            event = Mock()
-            parsed.append((msg, task, event))
-            tasks.append(task)
-
-        # Mock _fetch_and_merge_project_rows to return non-empty rows
-        entity_rows = EntityRowsMessage()
-        entity_rows.projects = [{"project_id": "proj-456"}]
-        worker._fetch_and_merge_project_rows = AsyncMock(return_value=entity_rows)
-
-        await worker._preflight_project_check(parsed)
-
-        # Verify all 3 tasks passed, not just first
-        call_args = worker._produce_entity_rows.call_args[0]
-        dispatched_tasks = call_args[1]
-        assert len(dispatched_tasks) == 3
+    """Tests for preflight project cache fixes."""
 
     @pytest.mark.asyncio
     async def test_fetch_and_merge_logs_warning_on_failure(

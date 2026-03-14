@@ -201,12 +201,6 @@ Examples:
     )
 
     parser.add_argument(
-        "--no-delta",
-        action="store_true",
-        help="Disable Delta Lake writes (for testing)",
-    )
-
-    parser.add_argument(
         "--log-level",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         default="INFO",
@@ -252,30 +246,7 @@ def _create_event_ingester_task(verisk_runners, eventhub_config, kafka_config, s
     )
 
 
-def _create_delta_writer_tasks(verisk_runners, kafka_config, events_table_path, shutdown_event):
-    tasks = []
-    tasks.append(
-        asyncio.create_task(
-            verisk_runners.run_delta_events_worker(
-                kafka_config, events_table_path, shutdown_event
-            ),
-            name="xact-delta-writer",
-        )
-    )
-    logger.info("Delta events writer enabled")
-
-    tasks.append(
-        asyncio.create_task(
-            verisk_runners.run_xact_retry_scheduler(kafka_config, shutdown_event),
-            name="xact-retry-scheduler",
-        )
-    )
-    logger.info("XACT unified retry scheduler enabled")
-
-    return tasks
-
-
-def _create_core_xact_tasks(verisk_runners, kafka_config, shutdown_event, pipeline_config, enable_delta_writes):
+def _create_core_xact_tasks(verisk_runners, kafka_config, shutdown_event):
     return [
         asyncio.create_task(
             verisk_runners.run_download_worker(kafka_config, shutdown_event),
@@ -286,25 +257,17 @@ def _create_core_xact_tasks(verisk_runners, kafka_config, shutdown_event, pipeli
             name="xact-upload",
         ),
         asyncio.create_task(
-            verisk_runners.run_result_processor(
-                kafka_config,
-                shutdown_event,
-                enable_delta_writes,
-                inventory_table_path=pipeline_config.inventory_table_path,
-                failed_table_path=pipeline_config.failed_table_path,
-            ),
-            name="xact-result-processor",
+            verisk_runners.run_xact_retry_scheduler(kafka_config, shutdown_event),
+            name="xact-retry-scheduler",
         ),
     ]
 
 
 async def run_all_workers(
     pipeline_config,
-    enable_delta_writes: bool = True,
 ):
     """Run all pipeline workers concurrently.
-    Architecture: events.raw → EventIngester → downloads.pending → DownloadWorker → ...
-                  events.raw → DeltaEventsWorker → Delta table (parallel)"""
+    Architecture: events.raw → EventIngester → downloads.pending → DownloadWorker → ..."""
     from config import get_config
     from pipeline.runners import verisk_runners
 
@@ -323,16 +286,8 @@ async def run_all_workers(
     )
     logger.info("Using Event Hub as event source")
 
-    events_table_path = pipeline_config.events_table_path
-    if enable_delta_writes and events_table_path:
-        tasks.extend(
-            _create_delta_writer_tasks(verisk_runners, kafka_config, events_table_path, shutdown_event)
-        )
-
     tasks.extend(
-        _create_core_xact_tasks(
-            verisk_runners, kafka_config, shutdown_event, pipeline_config, enable_delta_writes
-        )
+        _create_core_xact_tasks(verisk_runners, kafka_config, shutdown_event)
     )
 
     try:
@@ -703,12 +658,12 @@ def _load_pipeline_config(args, loop, early_health_server):
         return None
 
 
-def _start_workers(args, loop, pipeline_config, enable_delta_writes, eventhub_config, local_kafka_config):
+def _start_workers(args, loop, pipeline_config, eventhub_config, local_kafka_config):
     shutdown_event = get_shutdown_event()
 
     print("[STARTUP] Starting worker(s)...", flush=True)
     if args.worker == "all":
-        loop.run_until_complete(run_all_workers(pipeline_config, enable_delta_writes))
+        loop.run_until_complete(run_all_workers(pipeline_config))
     elif args.count > 1:
         loop.run_until_complete(
             run_worker_pool(
@@ -718,7 +673,6 @@ def _start_workers(args, loop, pipeline_config, enable_delta_writes, eventhub_co
                 args.worker,
                 pipeline_config,
                 shutdown_event,
-                enable_delta_writes,
                 eventhub_config,
                 local_kafka_config,
             )
@@ -729,7 +683,6 @@ def _start_workers(args, loop, pipeline_config, enable_delta_writes, eventhub_co
                 args.worker,
                 pipeline_config,
                 shutdown_event,
-                enable_delta_writes,
                 eventhub_config,
                 local_kafka_config,
             )
@@ -755,11 +708,10 @@ def main():
         return
     pipeline_config, eventhub_config, local_kafka_config = config_result
 
-    enable_delta_writes = not args.no_delta
     shutdown_event = get_shutdown_event()
 
     try:
-        _start_workers(args, loop, pipeline_config, enable_delta_writes, eventhub_config, local_kafka_config)
+        _start_workers(args, loop, pipeline_config, eventhub_config, local_kafka_config)
     except KeyboardInterrupt:
         logger.info("Keyboard interrupt received, shutting down...")
     except asyncio.CancelledError:

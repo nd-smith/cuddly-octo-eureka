@@ -1,19 +1,3 @@
-"""
-Xact writers package.
+"""Xact writers package."""
 
-Contains Delta table writers for verisk domain:
-- delta_events: Writer for verisk events table
-- delta_inventory: Writer for xact inventory table
-"""
-
-from pipeline.verisk.writers.delta_events import DeltaEventsWriter
-from pipeline.verisk.writers.delta_inventory import (
-    DeltaFailedAttachmentsWriter,
-    DeltaInventoryWriter,
-)
-
-__all__ = [
-    "DeltaEventsWriter",
-    "DeltaInventoryWriter",
-    "DeltaFailedAttachmentsWriter",
-]
+__all__: list[str] = []
